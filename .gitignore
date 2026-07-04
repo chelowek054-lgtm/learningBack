@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+
+# Env / secrets
+.env
+
+# Данные контейнеров и оркестрация docker-compose — в суперпроекте (корень), не здесь.

@@ -1,0 +1,27 @@
+[project]
+name = "learningback"
+version = "0.0.0"
+description = "Praxis backend — FastAPI (AI-оркестрация, sync, схема БД)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "pyjwt>=2.9",
+    "pwdlib[argon2]>=0.2",
+    "anthropic>=0.40",
+    "email-validator>=2.2",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.8"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
