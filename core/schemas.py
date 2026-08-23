@@ -40,6 +40,7 @@ class PasswordResetConfirmIn(BaseModel):
 class UserOut(BaseModel):
     id: uuid.UUID
     email: str | None
+    is_superuser: bool
     profile: dict[str, Any]
 
 

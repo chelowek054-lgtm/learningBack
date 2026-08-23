@@ -3,7 +3,7 @@
 
 from fastapi import APIRouter, HTTPException, status
 
-from core.deps import CurrentUser, SessionDep
+from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from modules.knowledge.ai import build_graph, expand_node
 from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.cow import effective_graph
@@ -31,9 +31,11 @@ def get_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
     return effective_graph(session, user.id, domain)
 
 
-# ---- канон-курирование (в KG2 — через редактор/импорт) ----
+# ---- канон-курирование: ТОЛЬКО администратор ----
+# Канон общий для всех пользователей, поэтому правит его только is_superuser.
+# Обычный пользователь работает со своим слоем (COW) — секция ниже.
 @router.post("/canon/build")
-def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> dict:
+def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep) -> dict:
     """LLM-черновик графа темы → персист как canonical draft (идемпотентно по domain+title)."""
     draft = build_graph(body.domain, body.topic)
     key_to_id: dict[str, object] = {}
@@ -69,7 +71,7 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
 
 
 @router.post("/canon/nodes", status_code=status.HTTP_201_CREATED)
-def create_canon_node(body: CanonNodeIn, _: CurrentUser, session: SessionDep) -> dict:
+def create_canon_node(body: CanonNodeIn, _: CurrentSuperuser, session: SessionDep) -> dict:
     c = Concept(
         domain=body.domain,
         title=body.title,
@@ -89,7 +91,7 @@ def create_canon_node(body: CanonNodeIn, _: CurrentUser, session: SessionDep) ->
 
 @router.put("/canon/nodes/{concept_id}")
 def update_canon_node(
-    concept_id: str, body: CanonNodePatch, _: CurrentUser, session: SessionDep
+    concept_id: str, body: CanonNodePatch, _: CurrentSuperuser, session: SessionDep
 ) -> dict:
     c = session.get(Concept, concept_id)
     if c is None:
@@ -110,7 +112,7 @@ def update_canon_node(
 
 
 @router.post("/canon/edges", status_code=status.HTTP_201_CREATED)
-def create_canon_edge(body: CanonEdgeIn, _: CurrentUser, session: SessionDep) -> dict:
+def create_canon_edge(body: CanonEdgeIn, _: CurrentSuperuser, session: SessionDep) -> dict:
     e = ConceptEdge(from_id=body.from_id, to_id=body.to_id, type=body.type)
     session.add(e)
     session.commit()
@@ -118,14 +120,14 @@ def create_canon_edge(body: CanonEdgeIn, _: CurrentUser, session: SessionDep) ->
 
 
 @router.post("/canon/recompute-centrality")
-def recompute(body: RecomputeIn, _: CurrentUser, session: SessionDep) -> list[dict]:
+def recompute(body: RecomputeIn, _: CurrentSuperuser, session: SessionDep) -> list[dict]:
     """Пересчёт centrality + предложение узлов в ядро (гибрид метрика/курирование)."""
     return recompute_centrality(session, body.domain)
 
 
 @router.post("/canon/nodes/{concept_id}/approve")
 def approve_node(
-    concept_id: str, body: ApproveNodeIn, _: CurrentUser, session: SessionDep
+    concept_id: str, body: ApproveNodeIn, _: CurrentSuperuser, session: SessionDep
 ) -> dict:
     """Governance: подтвердить draft-узел (status='approved'), опц. закрепить tier."""
     c = session.get(Concept, concept_id)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
+from sqladmin.filters import AllUniqueStringValuesFilter, BooleanFilter
 from starlette.requests import Request
 
 from core.config import settings
@@ -71,6 +72,7 @@ class UserAdmin(ModelView, model=User):
     column_list = [User.email, User.is_superuser, User.created_at]
     column_searchable_list = [User.email]
     column_sortable_list = [User.created_at, User.email]
+    column_filters = [BooleanFilter(User.is_superuser, title="Администратор")]
     # Хеш пароля не редактируем руками: пароль меняется через auth-эндпоинты.
     form_excluded_columns = [User.password_hash]
 
@@ -95,13 +97,25 @@ class ActivityAdmin(ModelView, model=Activity):
     icon = "fa-solid fa-list-check"
     category = "Ядро"
     column_list = [Activity.module, Activity.type, Activity.connectivity, Activity.due_at]
+    column_filters = [
+        AllUniqueStringValuesFilter(Activity.module, title="Модуль"),
+        AllUniqueStringValuesFilter(Activity.type, title="Тип"),
+        AllUniqueStringValuesFilter(Activity.connectivity, title="Связность"),
+    ]
 
 
 class ResponseAdmin(ModelView, model=Response):
     name_plural = "Ответы (event log)"
     icon = "fa-solid fa-clock-rotate-left"
     category = "Ядро"
-    column_list = [Response.user_id, Response.activity_id, Response.synced, Response.local_created_at]
+    column_list = [
+        Response.user_id,
+        Response.activity_id,
+        Response.synced,
+        Response.local_created_at,
+    ]
+    column_filters = [BooleanFilter(Response.synced, title="Синхронизирован")]
+    column_sortable_list = [Response.local_created_at]
 
 
 class SrsCardAdmin(ModelView, model=SrsCard):
@@ -109,6 +123,11 @@ class SrsCardAdmin(ModelView, model=SrsCard):
     icon = "fa-solid fa-layer-group"
     category = "Ядро"
     column_list = [SrsCard.module, SrsCard.source, SrsCard.due_at]
+    column_filters = [
+        AllUniqueStringValuesFilter(SrsCard.module, title="Модуль"),
+        AllUniqueStringValuesFilter(SrsCard.source, title="Источник"),
+    ]
+    column_sortable_list = [SrsCard.due_at]
 
 
 class JobAdmin(ModelView, model=Job):
@@ -116,6 +135,11 @@ class JobAdmin(ModelView, model=Job):
     icon = "fa-solid fa-gears"
     category = "Ядро"
     column_list = [Job.type, Job.status, Job.attempts, Job.updated_at]
+    column_filters = [
+        AllUniqueStringValuesFilter(Job.status, title="Статус"),
+        AllUniqueStringValuesFilter(Job.type, title="Тип"),
+    ]
+    column_sortable_list = [Job.updated_at]
 
 
 class MaterialAdmin(ModelView, model=Material):
@@ -123,6 +147,11 @@ class MaterialAdmin(ModelView, model=Material):
     icon = "fa-solid fa-book"
     category = "Ядро"
     column_list = [Material.module, Material.source, Material.title]
+    column_searchable_list = [Material.title]
+    column_filters = [
+        AllUniqueStringValuesFilter(Material.module, title="Модуль"),
+        AllUniqueStringValuesFilter(Material.source, title="Источник"),
+    ]
 
 
 class RubricAdmin(ModelView, model=Rubric):
@@ -130,6 +159,7 @@ class RubricAdmin(ModelView, model=Rubric):
     icon = "fa-solid fa-ruler"
     category = "Ядро"
     column_list = [Rubric.id, Rubric.version, Rubric.module, Rubric.model]
+    column_filters = [AllUniqueStringValuesFilter(Rubric.module, title="Модуль")]
 
 
 _CORE_VIEWS = [
