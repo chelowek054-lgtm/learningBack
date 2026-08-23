@@ -4,7 +4,7 @@ from typing import Any
 
 from anthropic import Anthropic
 
-from core.ai_gateway.base import GRAPH_IO_SCHEMA, render_prompt
+from core.ai_gateway.base import render_prompt
 from core.config import settings
 from core.models import Rubric
 
@@ -50,42 +50,18 @@ class ClaudeAIGateway:
         # LLM-генерация passages/вопросов — Фаза 2.
         return {"generator": generator_id, "items": []}
 
-    def _graph_call(self, prompt: str) -> dict[str, Any]:
+    def structured(
+        self, tool_name: str, description: str, schema: dict[str, Any], prompt: str
+    ) -> dict[str, Any]:
+        """Structured output под произвольную схему — схему даёт вызывающий модуль."""
         resp = self._client.messages.create(
             model=settings.model_generation,
             max_tokens=4096,
-            tools=[
-                {
-                    "name": "submit_graph",
-                    "description": "Вернуть граф концепций (узлы с теорией + связи).",
-                    "input_schema": GRAPH_IO_SCHEMA,
-                }
-            ],
-            tool_choice={"type": "tool", "name": "submit_graph"},
+            tools=[{"name": tool_name, "description": description, "input_schema": schema}],
+            tool_choice={"type": "tool", "name": tool_name},
             messages=[{"role": "user", "content": prompt}],
         )
         for block in resp.content:
             if block.type == "tool_use":
                 return dict(block.input)
-        raise RuntimeError("Claude не вернул граф")
-
-    def build_graph(self, domain: str, topic: str) -> dict[str, Any]:
-        prompt = (
-            f"Построй граф концепций темы «{topic}» в области «{domain}».\n"
-            "Узлы — ключевые концепции с краткой теорией (content.summary, 1–3 предложения).\n"
-            "Связи: prereq (предпосылка) и specializes (общее→частное).\n"
-            "Пометь ФУНДАМЕНТАЛЬНЫЕ узлы (примитивы, от которых зависит многое) tier='core', "
-            "остальные tier='derived'. Дай key (snake_case латиницей), title, bloomLevels, "
-            "difficulty 1–5, confidence 0–1."
-        )
-        g = self._graph_call(prompt)
-        g.setdefault("domain", domain)
-        return g
-
-    def expand_node(self, node_title: str, direction: str) -> dict[str, Any]:
-        prompt = (
-            f"Дорасти граф от узла «{node_title}» в направлении «{direction}»: "
-            "2–4 новых узла (tier='derived') с краткой теорией и связями (prereq/specializes/related) "
-            "от исходного узла. key — snake_case латиницей."
-        )
-        return self._graph_call(prompt)
+        raise RuntimeError(f"Claude не вернул tool_use для {tool_name}")

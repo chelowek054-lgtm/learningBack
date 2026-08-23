@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from core.models import Concept, ConceptEdge
+from modules.knowledge.models import Concept, ConceptEdge
 
 # Порог предложения в ядро (доля узлов, зависящих от данного).
 CORE_THRESHOLD = 0.5

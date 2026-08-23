@@ -10,6 +10,7 @@ from core.db import Base
 
 # Импорт моделей регистрирует таблицы в Base.metadata.
 import core.models  # noqa: F401
+import modules.knowledge.models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

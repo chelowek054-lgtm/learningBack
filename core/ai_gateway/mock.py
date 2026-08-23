@@ -44,49 +44,9 @@ class MockAIGateway:
     def generate(self, generator_id: str, params: dict[str, Any]) -> dict[str, Any]:
         return {"generator": generator_id, "items": []}
 
-    def build_graph(self, domain: str, topic: str) -> dict[str, Any]:
-        # Детерминированный черновой ML-граф; ядро помечено tier='core'.
-        def node(key, title, tier):
-            return {
-                "key": key,
-                "title": title,
-                "tier": tier,
-                "content": {"summary": f"{title} — теория (mock)", "sections": [], "references": []},
-                "bloomLevels": ["remember", "understand", "apply"],
-                "difficulty": 2,
-                "confidence": 0.6,
-            }
-
-        nodes = [
-            node("linear_algebra", "Линейная алгебра", "core"),
-            node("neural_nets", "Нейросети", "core"),
-            node("backprop", "Backprop", "core"),
-            node("softmax", "Softmax", "derived"),
-            node("attention", "Attention", "derived"),
-            node("transformers", topic or "Трансформеры", "derived"),
-        ]
-        edges = [
-            {"from": "linear_algebra", "to": "neural_nets", "type": "prereq"},
-            {"from": "neural_nets", "to": "backprop", "type": "prereq"},
-            {"from": "neural_nets", "to": "softmax", "type": "prereq"},
-            {"from": "backprop", "to": "attention", "type": "prereq"},
-            {"from": "softmax", "to": "attention", "type": "prereq"},
-            {"from": "attention", "to": "transformers", "type": "specializes"},
-        ]
-        return {"domain": domain, "nodes": nodes, "edges": edges}
-
-    def expand_node(self, node_title: str, direction: str) -> dict[str, Any]:
-        return {
-            "nodes": [
-                {
-                    "key": f"{direction}_ext",
-                    "title": f"{node_title} → {direction}",
-                    "tier": "derived",
-                    "content": {"summary": f"ветка про {direction} (mock)"},
-                    "bloomLevels": ["understand", "apply"],
-                    "difficulty": 3,
-                    "confidence": 0.5,
-                }
-            ],
-            "edges": [{"from": node_title, "to": f"{direction}_ext", "type": "related"}],
-        }
+    def structured(
+        self, tool_name: str, description: str, schema: dict[str, Any], prompt: str
+    ) -> dict[str, Any]:
+        """Заглушка не умеет сочинять под произвольную схему: предметные фикстуры
+        держат сами модули (см. modules/knowledge/ai.py)."""
+        return {}

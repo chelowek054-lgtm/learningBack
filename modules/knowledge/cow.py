@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from core.models import Concept, ConceptEdge, UserConcept, UserEdge
+from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
 
 
 def resolve_node(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:

@@ -3,12 +3,12 @@
 
 from fastapi import APIRouter, HTTPException, status
 
-from core.ai_gateway import get_ai_gateway
 from core.deps import CurrentUser, SessionDep
-from core.graph_service import recompute_centrality
-from core.knowledge import effective_graph
-from core.models import Concept, ConceptEdge, UserConcept, UserEdge
-from core.schemas import (
+from modules.knowledge.ai import build_graph, expand_node
+from modules.knowledge.centrality import recompute_centrality
+from modules.knowledge.cow import effective_graph
+from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
+from modules.knowledge.schemas import (
     ApproveNodeIn,
     BuildGraphIn,
     CanonEdgeIn,
@@ -35,7 +35,7 @@ def get_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
 @router.post("/canon/build")
 def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> dict:
     """LLM-черновик графа темы → персист как canonical draft (идемпотентно по domain+title)."""
-    draft = get_ai_gateway().build_graph(body.domain, body.topic)
+    draft = build_graph(body.domain, body.topic)
     key_to_id: dict[str, object] = {}
     for n in draft.get("nodes", []):
         existing = (
@@ -145,7 +145,7 @@ def expand(body: ExpandIn, user: CurrentUser, session: SessionDep) -> dict:
     c = session.get(Concept, str(body.concept_id))
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
-    result = get_ai_gateway().expand_node(c.title, body.direction)
+    result = expand_node(c.title, body.direction)
     for n in result.get("nodes", []):
         uc = UserConcept(
             user_id=user.id,

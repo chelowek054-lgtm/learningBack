@@ -4,7 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
-from core.routers import auth, content, graph, jobs, sync
+from core.routers import auth, content, jobs, sync
+from modules.knowledge import router as knowledge_router
 
 app = FastAPI(title="Praxis API", version="0.0.0")
 
@@ -27,7 +28,7 @@ app.include_router(sync.router)
 app.include_router(jobs.router)
 app.include_router(content.router)
 app.include_router(auth.router)
-app.include_router(graph.router)
+app.include_router(knowledge_router)
 
 
 @app.get("/health", tags=["meta"])
