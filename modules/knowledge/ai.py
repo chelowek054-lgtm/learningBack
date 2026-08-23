@@ -26,7 +26,46 @@ GRAPH_IO_SCHEMA: dict[str, Any] = {
                     "tier": {"type": "string", "enum": ["core", "derived"]},
                     "content": {
                         "type": "object",
-                        "properties": {"summary": {"type": "string"}},
+                        "description": "Теория узла: из неё генерируются тест и практика.",
+                        "properties": {
+                            "summary": {
+                                "type": "string",
+                                "description": "2-4 предложения: что это и зачем",
+                            },
+                            "sections": {
+                                "type": "array",
+                                "description": "1-3 раздела, раскрывающих концепцию",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "heading": {"type": "string"},
+                                        "body": {"type": "string"},
+                                        "examples": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                        "counter_examples": {
+                                            "type": "array",
+                                            "description": "типичные заблуждения и что в них неверно",
+                                            "items": {"type": "string"},
+                                        },
+                                    },
+                                    "required": ["heading", "body"],
+                                },
+                            },
+                            "references": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {"type": "string"},
+                                        "url": {"type": "string"},
+                                    },
+                                    "required": ["title"],
+                                },
+                            },
+                        },
+                        "required": ["summary", "sections"],
                     },
                     "bloomLevels": {"type": "array", "items": {"type": "string"}},
                     "difficulty": {"type": "integer"},
@@ -70,7 +109,11 @@ def build_graph(domain: str, topic: str) -> dict[str, Any]:
         return _fixture_graph(topic)
     prompt = (
         f"Построй граф концепций темы «{topic}» в области «{domain}».\n"
-        "Узлы — ключевые концепции с краткой теорией (content.summary, 1–3 предложения).\n"
+        "Каждый узел несёт ТЕОРИЮ, из которой потом генерируются тест и практика:\n"
+        "  content.summary — 2–4 предложения: что это и зачем;\n"
+        "  content.sections — 1–3 раздела, в каждом examples и counter_examples "
+        "(типичные заблуждения);\n"
+        "  content.references — источники, если уверен в них.\n"
         "Связи: prereq (предпосылка) и specializes (общее→частное).\n"
         "Пометь ФУНДАМЕНТАЛЬНЫЕ узлы (примитивы, от которых зависит многое) tier='core', "
         "остальные tier='derived'. Дай key (snake_case латиницей), title, bloomLevels, "
@@ -87,7 +130,8 @@ def expand_node(node_title: str, direction: str) -> dict[str, Any]:
         return _fixture_expand(node_title, direction)
     prompt = (
         f"Дорасти граф от узла «{node_title}» в направлении «{direction}»: "
-        "2–4 новых узла (tier='derived') с краткой теорией и связями (prereq/specializes/related) "
+        "2–4 новых узла (tier='derived') с теорией (summary + sections с примерами) "
+        "и связями (prereq/specializes/related) "
         "от исходного узла. key — snake_case латиницей."
     )
     return get_ai_gateway().structured(_TOOL, _TOOL_DESC, GRAPH_IO_SCHEMA, prompt)
@@ -102,7 +146,21 @@ def _node(key: str, title: str, tier: str) -> dict[str, Any]:
         "key": key,
         "title": title,
         "tier": tier,
-        "content": {"summary": f"{title} — теория (mock)", "sections": [], "references": []},
+        "content": {
+            "summary": (
+                f"{title} — базовая концепция области. Заглушка для разработки без ключа: "
+                "текст фиктивный, но форма настоящая, чтобы по ней работала генерация заданий."
+            ),
+            "sections": [
+                {
+                    "heading": f"Как устроен {title}",
+                    "body": f"Разбор механики: что именно делает {title} и на чём это держится.",
+                    "examples": [f"типовое применение {title}"],
+                    "counter_examples": [f"частое заблуждение про {title}"],
+                }
+            ],
+            "references": [{"title": "mock reference", "url": None}],
+        },
         "bloomLevels": ["remember", "understand", "apply"],
         "difficulty": 2,
         "confidence": 0.6,

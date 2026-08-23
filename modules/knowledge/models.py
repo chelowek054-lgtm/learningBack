@@ -60,6 +60,8 @@ class UserConcept(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
+    # Домен обязателен: без него персональные узлы протекали в графы чужих областей.
+    domain: Mapped[str] = mapped_column(String, nullable=False)
     base_concept_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("concept.id"), nullable=True
     )
@@ -71,7 +73,10 @@ class UserConcept(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
-    __table_args__ = (Index("idx_user_concept_user", "user_id", "base_concept_id"),)
+    __table_args__ = (
+        Index("idx_user_concept_user", "user_id", "base_concept_id"),
+        Index("idx_user_concept_user_domain", "user_id", "domain"),
+    )
 
 
 class UserEdge(Base):
@@ -81,11 +86,15 @@ class UserEdge(Base):
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
+    domain: Mapped[str] = mapped_column(String, nullable=False)
     from_id: Mapped[uuid.UUID] = mapped_column(nullable=False)  # concept.id | user_concept.id
     to_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)
 
-    __table_args__ = (Index("idx_user_edge_user", "user_id"),)
+    __table_args__ = (
+        Index("idx_user_edge_user", "user_id"),
+        Index("idx_user_edge_user_domain", "user_id", "domain"),
+    )
 
 
 class Assessment(Base):

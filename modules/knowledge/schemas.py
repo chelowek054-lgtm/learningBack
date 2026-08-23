@@ -5,6 +5,8 @@ import uuid
 
 from pydantic import BaseModel, Field
 
+from modules.knowledge.content import NodeContent
+
 
 class BuildGraphIn(BaseModel):
     domain: str
@@ -15,7 +17,7 @@ class CanonNodeIn(BaseModel):
     domain: str
     title: str
     tier: str = "derived"
-    content: dict[str, Any] = Field(default_factory=dict)
+    content: NodeContent = Field(default_factory=NodeContent)
     bloom_levels: list[str] = Field(default_factory=list)
     difficulty: int = 1
     source: str = "curated"
@@ -25,7 +27,7 @@ class CanonNodeIn(BaseModel):
 class CanonNodePatch(BaseModel):
     title: str | None = None
     tier: str | None = None
-    content: dict[str, Any] | None = None
+    content: NodeContent | None = None
     centrality: float | None = None
     status: str | None = None
 
@@ -37,22 +39,24 @@ class CanonEdgeIn(BaseModel):
 
 
 class OwnNodeIn(BaseModel):
+    domain: str
     title: str
-    content: dict[str, Any] = Field(default_factory=dict)
+    content: NodeContent = Field(default_factory=NodeContent)
 
 
 class OverrideIn(BaseModel):
-    content: dict[str, Any]
+    content: NodeContent
 
 
 class UserNodePatch(BaseModel):
     title: str | None = None
-    content: dict[str, Any] | None = None
+    content: NodeContent | None = None
     mastery: dict[str, Any] | None = None
     status: str | None = None
 
 
 class UserEdgeIn(BaseModel):
+    domain: str
     from_id: uuid.UUID
     to_id: uuid.UUID
     type: str

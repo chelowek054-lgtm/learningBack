@@ -1,11 +1,16 @@
 """CRUD API графа знаний (KG1-03). Эффективный граф (COW), персональный слой,
 канон-курирование, build-draft через AI-gateway. См. 05-knowledge-model."""
 
-from fastapi import APIRouter, HTTPException, status
+import uuid
+
+from fastapi import APIRouter, HTTPException, Query, status
 
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from modules.knowledge.ai import build_graph, expand_node
+from modules.knowledge.assessment import NotGroundable
+from modules.knowledge.assessment_store import get_or_generate
 from modules.knowledge.centrality import recompute_centrality
+from modules.knowledge.content import coerce_content
 from modules.knowledge.cow import effective_graph
 from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
 from modules.knowledge.schemas import (
@@ -50,7 +55,7 @@ def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep)
             domain=body.domain,
             title=n["title"],
             tier=n.get("tier", "derived"),
-            content=n.get("content", {}),
+            content=coerce_content(n.get("content")),
             bloom_levels=n.get("bloomLevels", []),
             difficulty=n.get("difficulty", 1),
             source="llm",
@@ -76,7 +81,7 @@ def create_canon_node(body: CanonNodeIn, _: CurrentSuperuser, session: SessionDe
         domain=body.domain,
         title=body.title,
         tier=body.tier,
-        content=body.content,
+        content=body.content.model_dump(),
         bloom_levels=body.bloom_levels,
         difficulty=body.difficulty,
         source=body.source,
@@ -105,7 +110,7 @@ def update_canon_node(
     if body.status is not None:
         c.status = body.status
     if body.content is not None:
-        c.content = body.content
+        c.content = body.content.model_dump()
         c.version += 1  # версионирование при смене контента (инвариант №5)
     session.commit()
     return {"id": str(c.id), "version": c.version}
@@ -140,6 +145,59 @@ def approve_node(
     return {"id": str(c.id), "status": c.status, "tier": c.tier}
 
 
+# ---- задания по теории узла (KG3) ----
+@router.get("/nodes/{concept_id}/assessment")
+def node_assessment(
+    concept_id: str,
+    user: CurrentUser,
+    session: SessionDep,
+    bloom: str = Query(description="ступень Блума: remember|understand|apply|..."),
+    kind: str = Query("test", description="test | practice | probe"),
+) -> dict:
+    """Задания по узлу — из кэша, иначе генерируются и кэшируются.
+
+    Ключ кэша включает версию узла, поэтому правка теории сама обесценивает
+    прежние задания. Персональные узлы пока не поддержаны: у них нет версии,
+    а без неё кэш не обесценить.
+    """
+    concept = session.get(Concept, concept_id)
+    if concept is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
+    try:
+        payload, cached = get_or_generate(session, concept, bloom, kind)
+    except NotGroundable as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    return {
+        "conceptId": str(concept.id),
+        "conceptVersion": concept.version,
+        "cached": cached,
+        **payload.model_dump(),
+    }
+
+
+@router.post("/nodes/{concept_id}/assessment/regenerate")
+def regenerate_assessment(
+    concept_id: str,
+    _: CurrentSuperuser,
+    session: SessionDep,
+    bloom: str = Query(description="ступень Блума"),
+    kind: str = Query("test", description="test | practice | probe"),
+) -> dict:
+    """Пересобрать задания, не меняя теорию узла (курирование)."""
+    concept = session.get(Concept, concept_id)
+    if concept is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
+    try:
+        payload, _cached = get_or_generate(session, concept, bloom, kind, force=True)
+    except NotGroundable as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    return {"conceptId": str(concept.id), "conceptVersion": concept.version, **payload.model_dump()}
+
+
 # ---- рост ветки под интересы (COW) ----
 @router.post("/expand")
 def expand(body: ExpandIn, user: CurrentUser, session: SessionDep) -> dict:
@@ -148,18 +206,65 @@ def expand(body: ExpandIn, user: CurrentUser, session: SessionDep) -> dict:
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
     result = expand_node(c.title, body.direction)
+
+    # key из ответа модели → id созданного узла: по ним восстанавливаются связи
+    # между новыми узлами, а не только «от исходного».
+    by_key: dict[str, uuid.UUID] = {}
+    created: list[uuid.UUID] = []
     for n in result.get("nodes", []):
         uc = UserConcept(
             user_id=user.id,
+            domain=c.domain,  # ветка растёт в домене узла, от которого её тянут
             base_concept_id=None,
             title=n["title"],
-            content_override=n.get("content", {}),
+            content_override=coerce_content(n.get("content")),
             origin="grown_llm",
             status="learning",
         )
         session.add(uc)
         session.flush()
-        session.add(UserEdge(user_id=user.id, from_id=body.concept_id, to_id=uc.id, type="related"))
+        created.append(uc.id)
+        for alias in (n.get("key"), n.get("title")):
+            if alias:
+                by_key[str(alias)] = uc.id
+
+    def _resolve(ref: str) -> uuid.UUID | None:
+        """Конец ребра — либо новый узел по ключу, либо сам исходный узел."""
+        if ref in by_key:
+            return by_key[ref]
+        if ref in (c.title, str(c.id)):
+            return c.id
+        return None
+
+    linked: set[uuid.UUID] = set()
+    for e in result.get("edges", []):
+        src, dst = _resolve(str(e.get("from", ""))), _resolve(str(e.get("to", "")))
+        if src is None or dst is None or src == dst:
+            continue
+        session.add(
+            UserEdge(
+                user_id=user.id,
+                domain=c.domain,
+                from_id=src,
+                to_id=dst,
+                type=e.get("type", "related"),
+            )
+        )
+        linked.add(dst)
+
+    # Узел, который модель не связала ни с чем, всё равно должен висеть на ветке,
+    # иначе он потеряется в графе.
+    for node_id in created:
+        if node_id not in linked:
+            session.add(
+                UserEdge(
+                    user_id=user.id,
+                    domain=c.domain,
+                    from_id=c.id,
+                    to_id=node_id,
+                    type="related",
+                )
+            )
     session.commit()
     return effective_graph(session, user.id, c.domain)
 
@@ -169,9 +274,10 @@ def expand(body: ExpandIn, user: CurrentUser, session: SessionDep) -> dict:
 def create_own_node(body: OwnNodeIn, user: CurrentUser, session: SessionDep) -> dict:
     uc = UserConcept(
         user_id=user.id,
+        domain=body.domain,
         base_concept_id=None,
         title=body.title,
-        content_override=body.content,
+        content_override=body.content.model_dump(),
         origin="grown_llm",
         status="learning",
     )
@@ -185,7 +291,8 @@ def override_canon_node(
     base_concept_id: str, body: OverrideIn, user: CurrentUser, session: SessionDep
 ) -> dict:
     """Правка унаследованного канон-узла → персональный оверрайд (COW)."""
-    if session.get(Concept, base_concept_id) is None:
+    base = session.get(Concept, base_concept_id)
+    if base is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "canonical concept не найден")
     uc = (
         session.query(UserConcept)
@@ -193,9 +300,14 @@ def override_canon_node(
         .first()
     )
     if uc is None:
-        uc = UserConcept(user_id=user.id, base_concept_id=base_concept_id, origin="edited")
+        uc = UserConcept(
+            user_id=user.id,
+            domain=base.domain,  # оверрайд живёт в домене перекрываемого узла
+            base_concept_id=base_concept_id,
+            origin="edited",
+        )
         session.add(uc)
-    uc.content_override = body.content
+    uc.content_override = body.content.model_dump()
     uc.origin = "edited"
     session.commit()
     return {"userConceptId": str(uc.id)}
@@ -211,7 +323,7 @@ def patch_user_node(
     if body.title is not None:
         uc.title = body.title
     if body.content is not None:
-        uc.content_override = body.content
+        uc.content_override = body.content.model_dump()
     if body.mastery is not None:
         uc.mastery = body.mastery
     if body.status is not None:
@@ -230,7 +342,13 @@ def delete_user_node(user_concept_id: str, user: CurrentUser, session: SessionDe
 
 @router.post("/user-edges", status_code=status.HTTP_201_CREATED)
 def create_user_edge(body: UserEdgeIn, user: CurrentUser, session: SessionDep) -> dict:
-    e = UserEdge(user_id=user.id, from_id=body.from_id, to_id=body.to_id, type=body.type)
+    e = UserEdge(
+        user_id=user.id,
+        domain=body.domain,
+        from_id=body.from_id,
+        to_id=body.to_id,
+        type=body.type,
+    )
     session.add(e)
     session.commit()
     return {"id": str(e.id)}

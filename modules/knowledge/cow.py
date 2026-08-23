@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from modules.knowledge.content import ensure_shape
 from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
 
 
@@ -22,7 +23,7 @@ def resolve_node(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
             "title": c.title,
             "tier": c.tier,
             "centrality": c.centrality,
-            "content": content,
+            "content": ensure_shape(content),
             "bloomLevels": c.bloom_levels,
             "difficulty": c.difficulty,
             "version": c.version,
@@ -39,7 +40,7 @@ def resolve_node(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
         "title": uc.title,
         "tier": "derived",
         "centrality": 0.0,
-        "content": uc.content_override or {},
+        "content": ensure_shape(uc.content_override),
         "bloomLevels": [],
         "difficulty": 1,
         "version": 1,
@@ -54,7 +55,13 @@ def effective_graph(session: Session, user_id: uuid.UUID, domain: str) -> dict[s
     concepts = session.query(Concept).filter(Concept.domain == domain).all()
     concept_ids = {c.id for c in concepts}
 
-    ucs = session.query(UserConcept).filter(UserConcept.user_id == user_id).all()
+    # Фильтр по домену обязателен: иначе свои узлы пользователя из других
+    # областей подмешиваются в этот граф (баг до миграции 0006).
+    ucs = (
+        session.query(UserConcept)
+        .filter(UserConcept.user_id == user_id, UserConcept.domain == domain)
+        .all()
+    )
     by_base = {uc.base_concept_id: uc for uc in ucs if uc.base_concept_id is not None}
     own = [uc for uc in ucs if uc.base_concept_id is None]
 
@@ -62,13 +69,24 @@ def effective_graph(session: Session, user_id: uuid.UUID, domain: str) -> dict[s
     nodes += [resolve_node(None, uc) for uc in own]
 
     edges: list[dict[str, Any]] = []
-    for e in session.query(ConceptEdge).all():
-        if e.from_id in concept_ids or e.to_id in concept_ids:
-            edges.append(
-                {"id": str(e.id), "from": str(e.from_id), "to": str(e.to_id),
-                 "type": e.type, "kind": "canonical"}
-            )
-    for ue in session.query(UserEdge).filter(UserEdge.user_id == user_id).all():
+    canon_edges = (
+        session.query(ConceptEdge)
+        .filter(ConceptEdge.from_id.in_(concept_ids), ConceptEdge.to_id.in_(concept_ids))
+        .all()
+        if concept_ids
+        else []
+    )
+    for e in canon_edges:
+        edges.append(
+            {"id": str(e.id), "from": str(e.from_id), "to": str(e.to_id),
+             "type": e.type, "kind": "canonical"}
+        )
+    user_edges = (
+        session.query(UserEdge)
+        .filter(UserEdge.user_id == user_id, UserEdge.domain == domain)
+        .all()
+    )
+    for ue in user_edges:
         edges.append(
             {"id": str(ue.id), "from": str(ue.from_id), "to": str(ue.to_id),
              "type": ue.type, "kind": "personal"}
