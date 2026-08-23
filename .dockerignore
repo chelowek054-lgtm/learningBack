@@ -1,0 +1,15 @@
+# Что НЕ должно попадать в образ.
+# Без этого файла `COPY . .` затаскивал и виртуальное окружение, и .env с ключами.
+
+.venv/
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+.git/
+.gitignore

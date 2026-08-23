@@ -10,8 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from core.ai_gateway import get_ai_gateway
-from core.config import settings
+from core.ai_gateway import get_ai_gateway, has_llm
 from modules.knowledge.assessment import AssessmentItem
 
 ESTIMATE_IO_SCHEMA: dict[str, Any] = {
@@ -62,7 +61,7 @@ def _score_choice(item: AssessmentItem, answer: Any) -> tuple[float, str]:
 def _score_open(item: AssessmentItem, answer: str) -> tuple[float, str]:
     if not answer.strip():
         return 0.0, "Ответ пуст."
-    if not settings.claude_api_key:
+    if not has_llm():
         return _overlap_score(item.expected, answer)
 
     prompt = (

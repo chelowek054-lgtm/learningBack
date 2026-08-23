@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.ai_gateway import get_ai_gateway
-from core.config import settings
+from core.ai_gateway import get_ai_gateway, has_llm
 
 # JSON-schema инструмента submit_graph (structured output для build/expand).
 GRAPH_IO_SCHEMA: dict[str, Any] = {
@@ -100,15 +99,16 @@ _TOOL = "submit_graph"
 _TOOL_DESC = "Вернуть граф концепций (узлы с теорией + связи)."
 
 
-def build_graph(domain: str, topic: str) -> dict[str, Any]:
+def build_graph(domain: str, topic: str, max_nodes: int = 8) -> dict[str, Any]:
     """Черновой граф темы: {nodes:[{key,title,tier,content,...}], edges:[{from,to,type}]}.
 
     LLM помечает кандидатов в ядро (tier='core'); куратор подтверждает (KG2).
     """
-    if not settings.claude_api_key:
+    if not has_llm():
         return _fixture_graph(topic)
     prompt = (
-        f"Построй граф концепций темы «{topic}» в области «{domain}».\n"
+        f"Построй граф из НЕ БОЛЕЕ ЧЕМ {max_nodes} концепций темы «{topic}» "
+        f"в области «{domain}».\n"
         "Каждый узел несёт ТЕОРИЮ, из которой потом генерируются тест и практика:\n"
         "  content.summary — 2–4 предложения: что это и зачем;\n"
         "  content.sections — 1–3 раздела, в каждом examples и counter_examples "
@@ -117,7 +117,8 @@ def build_graph(domain: str, topic: str) -> dict[str, Any]:
         "Связи: prereq (предпосылка) и specializes (общее→частное).\n"
         "Пометь ФУНДАМЕНТАЛЬНЫЕ узлы (примитивы, от которых зависит многое) tier='core', "
         "остальные tier='derived'. Дай key (snake_case латиницей), title, bloomLevels, "
-        "difficulty 1–5, confidence 0–1."
+        "difficulty 1–5, confidence 0–1.\n"
+        "Пиши компактно: ответ должен уместиться в лимит токенов целиком."
     )
     g = get_ai_gateway().structured(_TOOL, _TOOL_DESC, GRAPH_IO_SCHEMA, prompt)
     g.setdefault("domain", domain)
@@ -126,7 +127,7 @@ def build_graph(domain: str, topic: str) -> dict[str, Any]:
 
 def expand_node(node_title: str, direction: str) -> dict[str, Any]:
     """Дорастить ветку от узла в направлении интереса: {nodes, edges}."""
-    if not settings.claude_api_key:
+    if not has_llm():
         return _fixture_expand(node_title, direction)
     prompt = (
         f"Дорасти граф от узла «{node_title}» в направлении «{direction}»: "

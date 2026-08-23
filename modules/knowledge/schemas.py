@@ -11,6 +11,12 @@ from modules.knowledge.content import NodeContent
 class BuildGraphIn(BaseModel):
     domain: str
     topic: str = ""
+    # Перегенерировать теорию существующих узлов. По умолчанию выключено:
+    # обычная перестройка не должна затирать курированный контент.
+    refresh: bool = False
+    # Ограничение размера графа. Ответ модели должен помещаться в бюджет токенов;
+    # без явного потолка запрос обрывается по длине и инструмент не вызывается.
+    max_nodes: int = Field(default=8, ge=2, le=20)
 
 
 class CanonNodeIn(BaseModel):

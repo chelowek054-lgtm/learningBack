@@ -1,0 +1,160 @@
+"""OpenRouterAIGateway — доступ к моделям через OpenAI-совместимый протокол.
+
+Отдельная реализация, а не настройка ClaudeAIGateway: у OpenRouter другой формат
+запроса (chat/completions + function calling), подменой base_url в SDK
+`anthropic` его не покрыть.
+
+Контракт тот же (`AIGateway`), поэтому модулям всё равно, кто отвечает:
+предметные схемы и промпты остаются в модулях, здесь только транспорт.
+
+Транспорт приходится делать живучим — мешают три разные вещи, и все три лечатся
+повтором, поэтому обрабатываются в одном цикле:
+  * сеть до openrouter.ai рвётся через раз (TLS handshake timeout);
+  * при нехватке кредита приходит 402, где НАЗВАН доступный бюджет токенов;
+  * модель иногда отвечает текстом вместо вызова инструмента.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+import httpx
+
+from core.ai_gateway.base import render_prompt
+from core.config import settings
+from core.models import Rubric
+
+_ATTEMPTS = 3
+# OpenRouter в тексте 402 сообщает, на сколько токенов хватает остатка.
+_AFFORDABLE = re.compile(r"can only afford (\d+)")
+# Запас до границы бюджета и минимум, ниже которого запрос бессмыслен.
+_BUDGET_MARGIN = 256
+_MIN_TOKENS = 512
+
+
+class OpenRouterAIGateway:
+    """Вызовы моделей OpenRouter со structured output через tool calling."""
+
+    def __init__(self) -> None:
+        headers = {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "Content-Type": "application/json",
+        }
+        # Необязательная атрибуция в рейтингах OpenRouter.
+        if settings.openrouter_site_url:
+            headers["HTTP-Referer"] = settings.openrouter_site_url
+        if settings.openrouter_site_title:
+            headers["X-OpenRouter-Title"] = settings.openrouter_site_title
+        self._client = httpx.Client(
+            base_url=settings.openrouter_base_url,
+            headers=headers,
+            timeout=httpx.Timeout(settings.openrouter_timeout_seconds),
+        )
+
+    def _call_tool(
+        self, model: str, tool_name: str, description: str, schema: dict[str, Any], prompt: str
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": model,
+            # max_tokens ОБЯЗАТЕЛЕН: без него OpenRouter резервирует потолок контекста
+            # модели и отклоняет запрос как неоплачиваемый.
+            "max_tokens": settings.openrouter_max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": description,
+                        "parameters": schema,
+                    },
+                }
+            ],
+            "tool_choice": {"type": "function", "function": {"name": tool_name}},
+        }
+
+        last_error = "причина неизвестна"
+        for _ in range(_ATTEMPTS):
+            try:
+                response = self._client.post("/chat/completions", json=payload)
+            except httpx.TransportError as e:
+                last_error = f"сеть до OpenRouter недоступна ({type(e).__name__})"
+                continue
+
+            if response.status_code == 402:
+                budget = self._affordable_budget(response.text)
+                if budget is None:
+                    raise RuntimeError(f"OpenRouter 402: {response.text[:220]}")
+                # Баланс тает по мере расходов — подстраиваем бюджет под остаток,
+                # иначе запрос отклоняется целиком, хотя денег на него хватает.
+                payload["max_tokens"] = budget
+                last_error = f"кредита хватило лишь на {budget} токенов"
+                continue
+
+            if response.status_code >= 400:
+                raise RuntimeError(f"OpenRouter {response.status_code}: {response.text[:220]}")
+
+            body = response.json()
+            if "error" in body:
+                raise RuntimeError(f"OpenRouter вернул ошибку: {str(body['error'])[:220]}")
+
+            choice = (body.get("choices") or [{}])[0]
+            message = choice.get("message") or {}
+            calls = message.get("tool_calls") or []
+            if calls:
+                return self._parse_arguments(model, calls[0])
+
+            # Обычно означает обрыв по длине: ответ не поместился в max_tokens.
+            last_error = (
+                f"модель не вызвала инструмент {tool_name} "
+                f"(finish_reason={choice.get('finish_reason')}, "
+                f"max_tokens={payload['max_tokens']})"
+            )
+
+        raise RuntimeError(f"{model}: не удалось за {_ATTEMPTS} попытки — {last_error}")
+
+    @staticmethod
+    def _affordable_budget(text: str) -> int | None:
+        match = _AFFORDABLE.search(text)
+        if not match:
+            return None
+        budget = int(match.group(1)) - _BUDGET_MARGIN
+        return budget if budget >= _MIN_TOKENS else None
+
+    @staticmethod
+    def _parse_arguments(model: str, call: dict[str, Any]) -> dict[str, Any]:
+        arguments = call.get("function", {}).get("arguments") or "{}"
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"{model} вернул невалидный JSON в аргументах инструмента") from e
+        return parsed if isinstance(parsed, dict) else {}
+
+    def grade(
+        self, rubric: Rubric, activity_payload: dict[str, Any], answer: Any
+    ) -> dict[str, Any]:
+        grade_schema = rubric.schema.get("grade_schema") or {"type": "object", "properties": {}}
+        grade = self._call_tool(
+            settings.openrouter_model_scoring,
+            "submit_grade",
+            "Вернуть оценку строго по рубрике.",
+            grade_schema,
+            render_prompt(rubric, activity_payload, answer),
+        )
+        grade.setdefault("rubricId", rubric.id)
+        grade.setdefault("rubricVersion", rubric.version)
+        grade.setdefault("gradedOfflineFallback", False)
+        return grade
+
+    def generate(self, generator_id: str, params: dict[str, Any]) -> dict[str, Any]:
+        # Генерация карточек остаётся детерминированной (модульные генераторы).
+        return {"generator": generator_id, "items": []}
+
+    def structured(
+        self, tool_name: str, description: str, schema: dict[str, Any], prompt: str
+    ) -> dict[str, Any]:
+        return self._call_tool(
+            settings.openrouter_model_generation, tool_name, description, schema, prompt
+        )

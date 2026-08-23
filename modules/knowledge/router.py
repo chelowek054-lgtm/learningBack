@@ -50,7 +50,7 @@ def get_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
 @router.post("/canon/build")
 def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep) -> dict:
     """LLM-черновик графа темы → персист как canonical draft (идемпотентно по domain+title)."""
-    draft = build_graph(body.domain, body.topic)
+    draft = build_graph(body.domain, body.topic, body.max_nodes)
     key_to_id: dict[str, object] = {}
     for n in draft.get("nodes", []):
         existing = (
@@ -62,9 +62,8 @@ def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep)
             # Иначе граф, построенный до KG3-01, навсегда остаётся непригодным для
             # генерации заданий и плейсмента.
             fresh = coerce_content(n.get("content"))
-            if not NodeContent.model_validate(existing.content or {}).is_groundable() and (
-                NodeContent.model_validate(fresh).is_groundable()
-            ):
+            stale = not NodeContent.model_validate(existing.content or {}).is_groundable()
+            if (stale or body.refresh) and NodeContent.model_validate(fresh).is_groundable():
                 existing.content = fresh
                 existing.version += 1  # версия растёт → кэш заданий обесценивается
                 if not existing.bloom_levels:

@@ -1,8 +1,10 @@
 # Praxis backend. uv-образ для установки зависимостей.
 FROM python:3.12-slim
 
-# Бинарники uv из официального образа.
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /bin/
+# uv ставим из PyPI, а не из ghcr.io/astral-sh/uv: реестр GitHub из демона Docker
+# в этой сети недоступен (TLS handshake timeout), тогда как PyPI доступен —
+# через него и так тянутся зависимости проекта.
+RUN pip install --no-cache-dir "uv==0.11.*"
 
 ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \

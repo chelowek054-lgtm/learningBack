@@ -173,3 +173,31 @@ def test_build_does_not_overwrite_usable_theory(session, client):
     kept = session.get(Concept, curated.id)
     assert kept.content["summary"] == "Моя формулировка"
     assert kept.version == before
+
+
+def test_refresh_regenerates_theory_that_already_looks_usable(session, client):
+    """Явный refresh нужен, чтобы заменить заглушки настоящей теорией."""
+    stub = Concept(
+        domain="ml",
+        title="Линейная алгебра",
+        tier="core",
+        content={
+            "summary": "Заглушка",
+            "sections": [{"heading": "H", "body": "B", "examples": [], "counter_examples": []}],
+            "references": [],
+        },
+        bloom_levels=[],
+        difficulty=1,
+        source="llm",
+        status="draft",
+    )
+    session.add(stub)
+    session.flush()
+    before = stub.version
+    api = client(make_user(session, superuser=True))
+
+    api.post("/graph/canon/build", json={"domain": "ml", "topic": "Demo"})
+    assert session.get(Concept, stub.id).version == before, "без refresh контент не трогаем"
+
+    api.post("/graph/canon/build", json={"domain": "ml", "topic": "Demo", "refresh": True})
+    assert session.get(Concept, stub.id).version == before + 1
