@@ -1,14 +1,30 @@
 """Аутентификация — собственный JWT (WS1)."""
 
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, status
 
+from core.config import settings
 from core.deps import CurrentUser, SessionDep
-from core.models import User
-from core.schemas import LoginIn, ProfileIn, RegisterIn, TokenOut, UserOut
+from core.models import PasswordResetCode, User
+from core.schemas import (
+    LoginIn,
+    PasswordResetConfirmIn,
+    PasswordResetRequestIn,
+    ProfileIn,
+    RegisterIn,
+    TokenOut,
+    UserOut,
+)
 from core.provisioning import provision_new_user
-from core.security import create_access_token, hash_password, verify_password
+from core.security import (
+    create_access_token,
+    generate_reset_code,
+    hash_password,
+    reset_code_expires_at,
+    verify_password,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -36,6 +52,63 @@ def login(body: LoginIn, session: SessionDep) -> TokenOut:
     ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный email или пароль")
     return TokenOut(access_token=create_access_token(str(user.id)))
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
+def password_reset_request(body: PasswordResetRequestIn, session: SessionDep) -> dict:
+    """Выпустить временный код восстановления.
+
+    Доставки (почта/SMS) ещё нет — код кладётся в `password_reset_code` и читается
+    из БД (pgAdmin). Ответ одинаков независимо от существования email, чтобы не
+    давать перебирать зарегистрированные адреса.
+    """
+    now = datetime.now(timezone.utc)
+    user = session.query(User).filter(User.email == body.email).first()
+    if user is not None:
+        # Прошлые невыданные коды гасим: действующим остаётся только последний.
+        session.query(PasswordResetCode).filter(
+            PasswordResetCode.user_id == user.id,
+            PasswordResetCode.used_at.is_(None),
+        ).update({PasswordResetCode.used_at: now}, synchronize_session=False)
+        session.add(
+            PasswordResetCode(
+                user_id=user.id,
+                code=generate_reset_code(),
+                expires_at=reset_code_expires_at(now),
+            )
+        )
+        session.commit()
+    return {"status": "accepted", "ttl_minutes": settings.password_reset_code_ttl_minutes}
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+def password_reset_confirm(body: PasswordResetConfirmIn, session: SessionDep) -> None:
+    now = datetime.now(timezone.utc)
+    user = session.query(User).filter(User.email == body.email).first()
+    entry = (
+        session.query(PasswordResetCode)
+        .filter(
+            PasswordResetCode.user_id == user.id,
+            PasswordResetCode.used_at.is_(None),
+            PasswordResetCode.expires_at > now,
+        )
+        .order_by(PasswordResetCode.created_at.desc())
+        .first()
+        if user is not None
+        else None
+    )
+    if entry is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код недействителен или просрочен")
+    if entry.attempts >= settings.password_reset_max_attempts:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, запросите новый код")
+    if not secrets.compare_digest(entry.code, body.code):
+        entry.attempts += 1
+        session.commit()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код недействителен или просрочен")
+
+    user.password_hash = hash_password(body.new_password)
+    entry.used_at = now
+    session.commit()
 
 
 @router.get("/me", response_model=UserOut)

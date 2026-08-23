@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 30  # 30 дней (MVP «для себя»)
 
+    # Восстановление пароля: 8-значный числовой код в таблице password_reset_code.
+    # Доставки (почта/SMS) пока нет — код читается из БД (pgAdmin). См. ROADMAP.
+    password_reset_code_ttl_minutes: int = 15
+    password_reset_max_attempts: int = 5
+
     # Модели Claude (сверять актуальность через skill claude-api).
     model_scoring: str = "claude-opus-4-8"
     model_generation: str = "claude-sonnet-4-6"

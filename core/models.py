@@ -47,6 +47,26 @@ class User(Base):
     profile: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
 
 
+class PasswordResetCode(Base):
+    """Временный код восстановления пароля, привязанный к пользователю.
+
+    Код хранится в открытом виде: доставки (почта/SMS) ещё нет, и читать его
+    предполагается из БД через pgAdmin. При появлении доставки — хешировать.
+    """
+
+    __tablename__ = "password_reset_code"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
+    code: Mapped[str] = mapped_column(String(8), nullable=False)  # 8 цифр, ведущие нули значимы
+    expires_at: Mapped[datetime] = mapped_column(_ts, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_password_reset_user", "user_id", "expires_at"),)
+
+
 class Activity(Base):
     __tablename__ = "activity"
 

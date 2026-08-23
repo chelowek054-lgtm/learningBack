@@ -1,5 +1,6 @@
 """Безопасность: хеширование паролей (argon2) и JWT (свой auth, WS1)."""
 
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -9,6 +10,8 @@ from core.config import settings
 
 _password_hash = PasswordHash.recommended()
 
+RESET_CODE_LENGTH = 8
+
 
 def hash_password(password: str) -> str:
     return _password_hash.hash(password)
@@ -16,6 +19,15 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     return _password_hash.verify(password, hashed)
+
+
+def generate_reset_code() -> str:
+    """8-значный числовой код. Строкой — ведущие нули значимы."""
+    return "".join(secrets.choice("0123456789") for _ in range(RESET_CODE_LENGTH))
+
+
+def reset_code_expires_at(now: datetime) -> datetime:
+    return now + timedelta(minutes=settings.password_reset_code_ttl_minutes)
 
 
 def create_access_token(subject: str) -> str:

@@ -27,6 +27,16 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=8, max_length=8, pattern=r"^\d{8}$")
+    new_password: str = Field(min_length=6)
+
+
 class UserOut(BaseModel):
     id: uuid.UUID
     email: str | None
