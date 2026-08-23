@@ -29,3 +29,13 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_current_superuser(user: "CurrentUser") -> User:
+    """Только для администраторов (курирование канона, служебные операции)."""
+    if not user.is_superuser:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Требуются права администратора")
+    return user
+
+
+CurrentSuperuser = Annotated[User, Depends(get_current_superuser)]

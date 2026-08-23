@@ -35,6 +35,10 @@ class User(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     email: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Доступ в админку и курирование канона. Выдаётся только через scripts/createsuperuser.
+    is_superuser: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     profile: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
 

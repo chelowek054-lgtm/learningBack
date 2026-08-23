@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from core.admin import setup_admin
 from core.config import settings
 from core.routers import auth, content, jobs, sync
 from modules.knowledge import router as knowledge_router
@@ -29,6 +30,9 @@ app.include_router(jobs.router)
 app.include_router(content.router)
 app.include_router(auth.router)
 app.include_router(knowledge_router)
+
+# Админка на /admin (вход — только is_superuser; см. scripts/createsuperuser.py).
+setup_admin(app)
 
 
 @app.get("/health", tags=["meta"])

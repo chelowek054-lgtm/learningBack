@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 30  # 30 дней (MVP «для себя»)
 
+    # Админка (sqladmin): секрет cookie-сессии. Пусто → берётся jwt_secret.
+    admin_session_secret: str = ""
+
     # Восстановление пароля: 8-значный числовой код в таблице password_reset_code.
     # Доставки (почта/SMS) пока нет — код читается из БД (pgAdmin). См. ROADMAP.
     password_reset_code_ttl_minutes: int = 15
