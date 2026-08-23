@@ -7,11 +7,18 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from modules.knowledge.ai import build_graph, expand_node
+from modules.knowledge.answer import score_answer
 from modules.knowledge.assessment import NotGroundable
 from modules.knowledge.assessment_store import get_or_generate
 from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import coerce_content
 from modules.knowledge.cow import effective_graph
+from modules.knowledge.placement import (
+    NoProbeAvailable,
+    next_probe,
+    placement_map,
+    record_answer,
+)
 from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
 from modules.knowledge.schemas import (
     ApproveNodeIn,
@@ -22,6 +29,7 @@ from modules.knowledge.schemas import (
     ExpandIn,
     OverrideIn,
     OwnNodeIn,
+    PlacementAnswerIn,
     RecomputeIn,
     UserEdgeIn,
     UserNodePatch,
@@ -196,6 +204,61 @@ def regenerate_assessment(
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     return {"conceptId": str(concept.id), "conceptVersion": concept.version, **payload.model_dump()}
+
+
+# ---- адаптивный плейсмент (KG4) ----
+@router.get("/placement/{domain}/probe")
+def placement_probe(
+    domain: str,
+    user: CurrentUser,
+    session: SessionDep,
+    target: str = Query("understand", description="целевая ступень Блума — задаёт пользователь"),
+) -> dict:
+    """Следующий зонд на границе знаний: где ответ даст больше всего информации."""
+    try:
+        return next_probe(session, user.id, domain, target)
+    except NoProbeAvailable as e:
+        return {"done": True, "reason": str(e), "map": placement_map(session, user.id, domain)}
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+
+
+@router.post("/placement/answer")
+def placement_answer(body: PlacementAnswerIn, user: CurrentUser, session: SessionDep) -> dict:
+    """Оценить ответ, обновить освоенность и выдать следующий зонд."""
+    concept = session.get(Concept, str(body.concept_id))
+    if concept is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
+    try:
+        payload, _ = get_or_generate(session, concept, body.bloom, "probe")
+    except NotGroundable as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+
+    score, explanation = score_answer(payload.items[0], body.answer)
+    state = record_answer(session, user.id, body.domain, concept.id, body.bloom, score)
+    session.commit()
+
+    result = {
+        "conceptId": str(concept.id),
+        "score": score,
+        "explanation": explanation,
+        "mastery": state.dump(),
+    }
+    try:
+        result["next"] = next_probe(session, user.id, body.domain, body.bloom)
+    except NoProbeAvailable as e:
+        result["next"] = None
+        result["done"] = True
+        result["reason"] = str(e)
+    return result
+
+
+@router.get("/placement/{domain}/map")
+def placement_state(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Карта освоенности: что известно, что на границе, что закрыто предпосылками."""
+    return placement_map(session, user.id, domain)
 
 
 # ---- рост ветки под интересы (COW) ----

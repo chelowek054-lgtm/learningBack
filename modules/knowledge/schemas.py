@@ -73,3 +73,10 @@ class RecomputeIn(BaseModel):
 class ExpandIn(BaseModel):
     concept_id: uuid.UUID
     direction: str
+
+
+class PlacementAnswerIn(BaseModel):
+    domain: str
+    concept_id: uuid.UUID
+    bloom: str
+    answer: Any = None

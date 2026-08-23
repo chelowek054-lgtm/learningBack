@@ -188,10 +188,12 @@ def _parse_items(raw: Any) -> list[AssessmentItem]:
 
 def _fixture_items(
     title: str, content: NodeContent, bloom: str, kind: str
-) -> list[AssessmentItem]:
+) -> list[AssessmentItem]:  # noqa: ARG001
     first = content.sections[0] if content.sections else None
 
-    if kind == "test" and bloom == "remember":
+    # Ветвимся по СТУПЕНИ, а не по форме: probe может прийти на любой ступени,
+    # и раньше он молча получал практическое задание вместо вопроса на вспоминание.
+    if bloom == "remember":
         return [
             AssessmentItem(
                 prompt=f"Что такое «{title}» и зачем оно нужно?",
@@ -200,9 +202,10 @@ def _fixture_items(
             )
         ]
 
-    if kind == "test":  # understand
-        if first is None:
-            return []
+    if first is None:
+        return []
+
+    if bloom == "understand":
         options = [Option(text=first.body, correct=True, why="соответствует разделу узла")]
         options += [
             Option(text=ce, correct=False, why="типичное заблуждение из теории узла")
@@ -217,9 +220,6 @@ def _fixture_items(
             )
         ]
 
-    # practice
-    if first is None:
-        return []
     example = first.examples[0] if first.examples else title
     return [
         AssessmentItem(
