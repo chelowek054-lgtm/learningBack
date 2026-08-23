@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     # Используется только backend'ом (инвариант №2). Пусто → MockAIGateway.
     claude_api_key: str = ""
 
+    # CORS: список origin через запятую, или "*" (для web-клиента Expo на :8081).
+    cors_origins: str = "*"
+
     # JWT (свой auth). Секрет — из окружения; дефолт только для dev.
     jwt_secret: str = "dev-insecure-change-me"
     jwt_algorithm: str = "HS256"

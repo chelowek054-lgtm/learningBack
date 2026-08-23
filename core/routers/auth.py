@@ -1,10 +1,13 @@
 """Аутентификация — собственный JWT (WS1)."""
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, status
 
 from core.deps import CurrentUser, SessionDep
 from core.models import User
 from core.schemas import LoginIn, ProfileIn, RegisterIn, TokenOut, UserOut
+from core.provisioning import provision_new_user
 from core.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -17,6 +20,9 @@ def register(body: RegisterIn, session: SessionDep) -> TokenOut:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email уже зарегистрирован")
     user = User(email=body.email, password_hash=hash_password(body.password), profile={})
     session.add(user)
+    session.flush()
+    # Провижининг: AWL-колода + демо-активности (полезно с первого входа).
+    provision_new_user(session, user.id, datetime.now(timezone.utc))
     session.commit()
     session.refresh(user)
     return TokenOut(access_token=create_access_token(str(user.id)))

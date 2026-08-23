@@ -42,6 +42,52 @@ GRADE_JSON_SCHEMA: dict[str, Any] = {
 }
 
 
+# JSON-schema графа (input_schema инструмента submit_graph для build_graph/expand_node).
+GRAPH_IO_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "snake_case латиницей"},
+                    "title": {"type": "string"},
+                    "tier": {"type": "string", "enum": ["core", "derived"]},
+                    "content": {
+                        "type": "object",
+                        "properties": {"summary": {"type": "string"}},
+                    },
+                    "bloomLevels": {"type": "array", "items": {"type": "string"}},
+                    "difficulty": {"type": "integer"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["key", "title", "tier", "content"],
+            },
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "from": {"type": "string"},
+                    "to": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "prereq", "specializes", "part_of",
+                            "related", "contrasts", "misconception", "example",
+                        ],
+                    },
+                },
+                "required": ["from", "to", "type"],
+            },
+        },
+    },
+    "required": ["nodes", "edges"],
+}
+
+
 class AIGateway(Protocol):
     def grade(
         self, rubric: Rubric, activity_payload: dict[str, Any], answer: Any
@@ -51,6 +97,15 @@ class AIGateway(Protocol):
 
     def generate(self, generator_id: str, params: dict[str, Any]) -> dict[str, Any]:
         """Сгенерировать контент (для MVP — минимально)."""
+        ...
+
+    def build_graph(self, domain: str, topic: str) -> dict[str, Any]:
+        """Черновой граф темы: {nodes:[{key,title,tier,content,...}], edges:[{from,to,type}]}.
+        LLM помечает кандидатов в ядро (tier='core'); куратор подтверждает (KG2)."""
+        ...
+
+    def expand_node(self, node_title: str, direction: str) -> dict[str, Any]:
+        """Дорастить ветку от узла в направлении интереса: {nodes, edges}."""
         ...
 
 
