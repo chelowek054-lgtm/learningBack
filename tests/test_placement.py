@@ -301,3 +301,50 @@ def test_map_endpoint_returns_the_whole_domain(session, client):
 
     assert len(body["nodes"]) == 2
     assert body["domain"] == "ml"
+
+
+# ---- почему зондирование не началось ----
+
+
+def test_reports_empty_graph(session):
+    user = make_user(session)
+
+    with pytest.raises(NoProbeAvailable) as e:
+        next_probe(session, user.id, "пустой", "remember")
+
+    assert e.value.code == "empty"
+
+
+def test_reports_that_nodes_have_no_theory(session):
+    """Регрессия: граф, построенный до KG3-01, давал молчаливый останов без причины."""
+    user = make_user(session)
+    bare = _c(session, "Ярлык")
+    bare.content = {"summary": "коротко"}
+    session.flush()
+
+    with pytest.raises(NoProbeAvailable) as e:
+        next_probe(session, user.id, "ml", "remember")
+
+    assert e.value.code == "no_theory"
+
+
+def test_reports_that_everything_is_settled(session):
+    user = make_user(session)
+    a = _c(session, "A")
+    save_state(session, user.id, "ml", a.id, MasteryState(alpha=20, beta=1, observations=20))
+
+    with pytest.raises(NoProbeAvailable) as e:
+        next_probe(session, user.id, "ml", "remember")
+
+    assert e.value.code == "settled"
+
+
+def test_endpoint_passes_the_reason_code(session, client):
+    bare = _c(session, "Ярлык")
+    bare.content = {"summary": "коротко"}
+    session.flush()
+
+    body = client(make_user(session)).get("/graph/placement/ml/probe?target=remember").json()
+
+    assert body["done"] is True
+    assert body["code"] == "no_theory"

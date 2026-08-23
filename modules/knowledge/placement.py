@@ -37,7 +37,11 @@ CENTRALITY_WEIGHT = 0.5
 
 
 class NoProbeAvailable(RuntimeError):
-    """Зондировать больше нечего: граница исчерпана или узлы без теории."""
+    """Зондировать нечего. `code` различает причины — они требуют разных действий."""
+
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def probe_bloom(concept: Concept, target: str) -> str:
@@ -79,7 +83,13 @@ def next_probe(
     session: Session, user_id: uuid.UUID, domain: str, target_bloom: str
 ) -> dict[str, Any]:
     """Следующий зонд: узел границы + задание из кэша (или сгенерированное)."""
-    for concept, state, score in rank_candidates(session, user_id, domain):
+    candidates = rank_candidates(session, user_id, domain)
+    if not candidates:
+        if not session.query(Concept).filter(Concept.domain == domain).first():
+            raise NoProbeAvailable(f"граф «{domain}» пуст", "empty")
+        raise NoProbeAvailable("всё, что можно было уточнить, уже уточнено", "settled")
+
+    for concept, state, score in candidates:
         bloom = probe_bloom(concept, target_bloom)
         try:
             payload, cached = get_or_generate(session, concept, bloom, PROBE_KIND)
@@ -96,7 +106,10 @@ def next_probe(
             "uncertainty": round(state.uncertainty, 3),
             "item": item.model_dump(),
         }
-    raise NoProbeAvailable("на границе знаний не осталось узлов, которые стоит зондировать")
+    raise NoProbeAvailable(
+        "ни у одного доступного узла нет теории, по которой можно задать вопрос",
+        "no_theory",
+    )
 
 
 def record_answer(

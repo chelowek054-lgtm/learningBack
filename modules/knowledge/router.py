@@ -11,7 +11,7 @@ from modules.knowledge.answer import score_answer
 from modules.knowledge.assessment import NotGroundable
 from modules.knowledge.assessment_store import get_or_generate
 from modules.knowledge.centrality import recompute_centrality
-from modules.knowledge.content import coerce_content
+from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.cow import effective_graph
 from modules.knowledge.placement import (
     NoProbeAvailable,
@@ -58,6 +58,17 @@ def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep)
         )
         if existing:
             key_to_id[n["key"]] = existing.id
+            # Узел уже есть, но без пригодной теории — дополняем, если черновик лучше.
+            # Иначе граф, построенный до KG3-01, навсегда остаётся непригодным для
+            # генерации заданий и плейсмента.
+            fresh = coerce_content(n.get("content"))
+            if not NodeContent.model_validate(existing.content or {}).is_groundable() and (
+                NodeContent.model_validate(fresh).is_groundable()
+            ):
+                existing.content = fresh
+                existing.version += 1  # версия растёт → кэш заданий обесценивается
+                if not existing.bloom_levels:
+                    existing.bloom_levels = n.get("bloomLevels", [])
             continue
         c = Concept(
             domain=body.domain,
@@ -218,7 +229,12 @@ def placement_probe(
     try:
         return next_probe(session, user.id, domain, target)
     except NoProbeAvailable as e:
-        return {"done": True, "reason": str(e), "map": placement_map(session, user.id, domain)}
+        return {
+            "done": True,
+            "reason": str(e),
+            "code": e.code,
+            "map": placement_map(session, user.id, domain),
+        }
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
 
@@ -252,6 +268,7 @@ def placement_answer(body: PlacementAnswerIn, user: CurrentUser, session: Sessio
         result["next"] = None
         result["done"] = True
         result["reason"] = str(e)
+        result["code"] = e.code
     return result
 
 

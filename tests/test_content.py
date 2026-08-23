@@ -119,3 +119,57 @@ def test_reading_a_node_returns_the_full_shape(session, client):
     node = client(make_user(session)).get("/graph/ml").json()["nodes"][0]
 
     assert set(node["content"]) == {"summary", "sections", "references"}
+
+
+def test_build_fills_in_theory_for_nodes_that_lack_it(session, client):
+    """Граф, построенный до KG3-01, должен дополняться, а не оставаться мёртвым."""
+    stale = Concept(
+        domain="ml",
+        title="Линейная алгебра",
+        tier="core",
+        content={"summary": "коротко"},
+        bloom_levels=[],
+        difficulty=1,
+        source="llm",
+        status="draft",
+    )
+    session.add(stale)
+    session.flush()
+    before = stale.version
+
+    client(make_user(session, superuser=True)).post(
+        "/graph/canon/build", json={"domain": "ml", "topic": "Demo"}
+    )
+
+    refreshed = session.get(Concept, stale.id)
+    assert refreshed.content["sections"], "теория должна появиться"
+    assert refreshed.version == before + 1, "версия растёт → кэш заданий обесценивается"
+
+
+def test_build_does_not_overwrite_usable_theory(session, client):
+    """Курированный контент трогать нельзя — обновляем только непригодные узлы."""
+    curated = Concept(
+        domain="ml",
+        title="Линейная алгебра",
+        tier="core",
+        content={
+            "summary": "Моя формулировка",
+            "sections": [{"heading": "Раздел", "body": "Текст", "examples": [], "counter_examples": []}],
+            "references": [],
+        },
+        bloom_levels=[],
+        difficulty=1,
+        source="curated",
+        status="approved",
+    )
+    session.add(curated)
+    session.flush()
+    before = curated.version
+
+    client(make_user(session, superuser=True)).post(
+        "/graph/canon/build", json={"domain": "ml", "topic": "Demo"}
+    )
+
+    kept = session.get(Concept, curated.id)
+    assert kept.content["summary"] == "Моя формулировка"
+    assert kept.version == before

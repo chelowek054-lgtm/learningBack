@@ -167,14 +167,16 @@ def _node(key: str, title: str, tier: str) -> dict[str, Any]:
     }
 
 
-def _fixture_graph(topic: str) -> dict[str, Any]:
+def _fixture_graph(topic: str) -> dict[str, Any]:  # noqa: ARG001
     nodes = [
         _node("linear_algebra", "Линейная алгебра", "core"),
         _node("neural_nets", "Нейросети", "core"),
         _node("backprop", "Backprop", "core"),
         _node("softmax", "Softmax", "derived"),
         _node("attention", "Attention", "derived"),
-        _node("transformers", topic or "Трансформеры", "derived"),
+        # Заголовок НЕ зависит от topic: дедупликация идёт по title, и
+        # переменное имя плодило дубли узла при каждом новом topic.
+        _node("transformers", "Трансформеры", "derived"),
     ]
     edges = [
         {"from": "linear_algebra", "to": "neural_nets", "type": "prereq"},
