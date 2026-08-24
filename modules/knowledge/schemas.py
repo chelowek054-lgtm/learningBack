@@ -86,3 +86,13 @@ class PlacementAnswerIn(BaseModel):
     concept_id: uuid.UUID
     bloom: str
     answer: Any = None
+
+
+class CourseIn(BaseModel):
+    target_bloom: str = "understand"
+    # Узлы-интересы: ради них строится ветвление, но только поверх ядра.
+    interests: list[uuid.UUID] = Field(default_factory=list)
+
+
+class CourseStepDone(BaseModel):
+    concept_id: uuid.UUID

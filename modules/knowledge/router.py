@@ -12,6 +12,7 @@ from modules.knowledge.assessment import NotGroundable
 from modules.knowledge.assessment_store import get_or_generate
 from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
+from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph
 from modules.knowledge.placement import (
     NoProbeAvailable,
@@ -19,13 +20,15 @@ from modules.knowledge.placement import (
     placement_map,
     record_answer,
 )
-from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
+from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
 from modules.knowledge.schemas import (
     ApproveNodeIn,
     BuildGraphIn,
     CanonEdgeIn,
     CanonNodeIn,
     CanonNodePatch,
+    CourseIn,
+    CourseStepDone,
     ExpandIn,
     OverrideIn,
     OwnNodeIn,
@@ -275,6 +278,42 @@ def placement_answer(body: PlacementAnswerIn, user: CurrentUser, session: Sessio
 def placement_state(domain: str, user: CurrentUser, session: SessionDep) -> dict:
     """Карта освоенности: что известно, что на границе, что закрыто предпосылками."""
     return placement_map(session, user.id, domain)
+
+
+# ---- курс: путь по графу до цели (KG5) ----
+@router.post("/course/{domain}")
+def create_course(
+    domain: str, body: CourseIn, user: CurrentUser, session: SessionDep
+) -> dict:
+    """Собрать курс от текущей границы знаний до заявленной ступени."""
+    try:
+        course = generate_course(
+            session, user.id, domain, body.target_bloom, list(body.interests)
+        )
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    session.commit()
+    return course_view(course)
+
+
+@router.get("/course/{domain}")
+def read_course(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    course = session.query(Course).filter_by(user_id=user.id, domain=domain).one_or_none()
+    if course is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "курс не построен")
+    return course_view(course)
+
+
+@router.post("/course/{domain}/complete")
+def complete_step(
+    domain: str, body: CourseStepDone, user: CurrentUser, session: SessionDep
+) -> dict:
+    course = session.query(Course).filter_by(user_id=user.id, domain=domain).one_or_none()
+    if course is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "курс не построен")
+    mark_completed(session, course, str(body.concept_id))
+    session.commit()
+    return course_view(course)
 
 
 # ---- рост ветки под интересы (COW) ----
