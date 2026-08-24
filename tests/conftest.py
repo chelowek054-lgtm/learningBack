@@ -32,6 +32,27 @@ import modules.knowledge.models  # noqa: F401
 TEST_DB_SUFFIX = "_test"
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _no_live_llm() -> Iterator[None]:
+    """Тесты не ходят к провайдеру, даже когда ключ настроен.
+
+    Раньше это выходило само собой: своего `.env` у backend'а не было, прогон шёл
+    без ключа и гейтвей отдавал заглушки. После переезда на общий `.env` ключ
+    виден и тестам — прогон начал стучаться в живую модель, стал медленным,
+    сетезависимым и платным. Герметичность должна держаться явно, а не тем,
+    что файла нет.
+
+    Тестам про сам выбор провайдера это не мешает: они подменяют ключ через
+    monkeypatch и восстанавливают его сами.
+    """
+    saved = settings.llm_api_key
+    settings.llm_api_key = ""
+    try:
+        yield
+    finally:
+        settings.llm_api_key = saved
+
+
 def _test_database_url() -> str:
     base, _, name = settings.database_url.rpartition("/")
     return f"{base}/{name}{TEST_DB_SUFFIX}"
