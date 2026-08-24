@@ -75,7 +75,7 @@ def test_tool_arguments_are_returned():
 
 
 def test_max_tokens_is_always_sent():
-    """Без явного лимита OpenRouter резервирует потолок контекста и отклоняет запрос."""
+    """Без явного лимита провайдер резервирует потолок контекста и отклоняет запрос."""
     gw, fake = _gateway(_tool_response({"ok": True}))
 
     gw.structured("t", "d", SCHEMA, "p")
@@ -148,25 +148,53 @@ def test_broken_json_in_arguments_is_reported():
 # ---- выбор провайдера ----
 
 
-def test_old_openrouter_key_is_reused_only_for_openrouter(monkeypatch):
-    """Ключ одного сервиса не должен уходить в другой: это выглядело бы как
-    «неверный ключ» вместо честной ошибки настройки."""
+def test_key_selects_the_real_gateway(monkeypatch):
+    """Есть ключ — идём к провайдеру; нет — честные заглушки, а не отказ."""
+    from core import ai_gateway
+    from core.ai_gateway.mock import MockAIGateway
+    from core.ai_gateway.openai_compatible import OpenAICompatibleGateway
+
+    monkeypatch.setattr(ai_gateway.settings, "llm_api_key", "sk-test")
+    assert isinstance(ai_gateway.get_ai_gateway(), OpenAICompatibleGateway)
+    assert ai_gateway.has_llm() is True
+
+    monkeypatch.setattr(ai_gateway.settings, "llm_api_key", "")
+    assert isinstance(ai_gateway.get_ai_gateway(), MockAIGateway)
+    assert ai_gateway.has_llm() is False
+
+
+def test_provider_is_an_address_not_a_class(monkeypatch):
+    """Смена провайдера — это адрес и слаг модели, а не новая реализация."""
     from core.config import Settings
 
-    at_openrouter = Settings(
-        llm_api_key="", openrouter_api_key="sk-old", llm_base_url="https://openrouter.ai/api/v1"
-    )
     elsewhere = Settings(
-        llm_api_key="", openrouter_api_key="sk-old", llm_base_url="https://routerai.ru/api/v1"
+        llm_api_key="sk-test",
+        llm_base_url="https://example-provider.test/v1",
+        llm_model_generation="vendor/some-model",
     )
 
-    assert at_openrouter.effective_llm_key == "sk-old"
-    assert elsewhere.effective_llm_key == ""
+    monkeypatch.setattr("core.ai_gateway.openai_compatible.settings", elsewhere)
+    gw = OpenAICompatibleGateway()
+
+    assert str(gw._client.base_url).startswith("https://example-provider.test/v1")
+    assert gw._client.headers["authorization"] == "Bearer sk-test"
 
 
-def test_explicit_key_always_wins():
-    from core.config import Settings
+def test_rubric_may_pin_its_own_model():
+    """Рубрика вправе назвать модель; иначе берётся модель из конфига."""
+    from core.config import settings as live
 
-    s = Settings(llm_api_key="sk-new", openrouter_api_key="sk-old")
+    gw, fake = _gateway(_tool_response({"overall": 5}), _tool_response({"overall": 5}))
 
-    assert s.effective_llm_key == "sk-new"
+    class _R:
+        id, version, prompt = "r", 1, "оцени"
+        schema = {"grade_schema": SCHEMA}
+        model = "vendor/pinned-model"
+
+    pinned = _R()
+    gw.grade(pinned, {"prompt": "task"}, "ответ")
+    assert fake.payloads[0]["model"] == "vendor/pinned-model"
+
+    pinned.model = ""
+    gw.grade(pinned, {"prompt": "task"}, "ответ")
+    assert fake.payloads[1]["model"] == live.llm_model_scoring

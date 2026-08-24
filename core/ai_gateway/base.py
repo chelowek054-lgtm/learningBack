@@ -1,11 +1,11 @@
-"""Контракт AI-gateway (см. 02-logical §6). Реализации: mock.py, claude.py."""
+"""Контракт AI-gateway (см. 02-logical §6). Реализации: mock.py, openai_compatible.py."""
 
 from typing import Any, Protocol
 
 from core.models import Rubric
 
 # JSON-schema результата Grade (общая для рубрик; используется как input_schema
-# инструмента submit_grade в Claude). Соответствует Grade из 02-logical §7.
+# инструмента submit_grade). Соответствует Grade из 02-logical §7.
 GRADE_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {

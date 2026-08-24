@@ -6,7 +6,9 @@ IELTS_WRITING_TASK2 = {
     "id": "ielts_writing_task2",
     "version": 1,
     "module": "languages",
-    "model": "claude-opus-4-8",
+    # Пусто → модель берётся из конфига (LLM_MODEL_SCORING); слаг здесь
+    # означал бы привязку рубрики к конкретному провайдеру.
+    "model": "",
     "prompt": (
         "Ты — экзаменатор IELTS Academic Writing Task 2. Оцени эссе по официальным "
         "band descriptors (0–9) по четырём критериям: Task Response, Coherence and "

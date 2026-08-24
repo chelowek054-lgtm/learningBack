@@ -24,12 +24,14 @@ scripts/seed.py  seed-заглушка
 Оркестрация — в **корне суперпроекта** (`../docker-compose.yml`), данные — в `../.data`.
 ```bash
 cd ..                          # в корень
-cp .env.example .env
+cp .env.example .env           # единственный .env проекта; своего у backend'а нет
 docker compose up --build      # Postgres + миграции + API
 # API: http://localhost:8000/docs  ·  health: http://localhost:8000/health
 ```
 
 ## Локальный запуск (без Docker для API)
+Настройки берутся из `../.env` (корень суперпроекта) — своего `.env` у backend'а нет.
+`DATABASE_URL` отдельно задавать не нужно: он собирается из `POSTGRES_*`.
 ```bash
 uv sync
 # нужен доступный Postgres — поднять только его из корня: (cd .. && docker compose up -d postgres)

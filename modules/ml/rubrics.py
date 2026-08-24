@@ -6,7 +6,9 @@ CONCEPT_CHECK = {
     "id": "concept_check",
     "version": 1,
     "module": "ml",
-    "model": "claude-opus-4-8",
+    # Пусто → модель берётся из конфига (LLM_MODEL_SCORING); слаг здесь
+    # означал бы привязку рубрики к конкретному провайдеру.
+    "model": "",
     "prompt": (
         "Ты проверяешь понимание концепции ML/программирования. Оцени открытый ответ по "
         "критериям: Correctness (фактическая верность), Completeness (полнота), Explanation "

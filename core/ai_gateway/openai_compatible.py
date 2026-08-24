@@ -1,18 +1,16 @@
 """Гейтвей к любому провайдеру с OpenAI-совместимым API.
 
-Одна реализация на всех: OpenRouter, RouterAI и подобные говорят одинаково —
+Одна реализация на всех: провайдеры этого протокола говорят одинаково —
 `POST {base_url}/chat/completions` с Bearer-ключом и tool calling. Провайдер
-задаётся адресом и слагом модели в конфиге, а не отдельным классом.
-
-Отдельно от ClaudeAIGateway: у Anthropic другой формат запроса, подменой
-base_url в их SDK его не покрыть.
+задаётся адресом и слагом модели в конфиге, а не отдельным классом: чтобы
+подключить следующего, кода писать не нужно.
 
 Контракт тот же (`AIGateway`), поэтому модулям всё равно, кто отвечает:
 предметные схемы и промпты остаются в модулях, здесь только транспорт.
 
 Транспорт приходится делать живучим — мешают три разные вещи, и все три лечатся
 повтором, поэтому обрабатываются в одном цикле:
-  * сеть до openrouter.ai рвётся через раз (TLS handshake timeout);
+  * канал до провайдера рвётся примерно на каждом третьем запросе;
   * при нехватке кредита приходит 402, где НАЗВАН доступный бюджет токенов;
   * модель иногда отвечает текстом вместо вызова инструмента.
 """
@@ -30,9 +28,9 @@ from core.config import settings
 from core.models import Rubric
 
 _ATTEMPTS = 3
-# Провайдер в тексте 402 сообщает, на сколько токенов хватает остатка
-# (так делает OpenRouter; у других формулировка может отличаться — тогда
-# просто не совпадёт и запрос честно упадёт с 402).
+# Провайдер в тексте 402 сообщает, на сколько токенов хватает остатка.
+# У разных сервисов формулировка отличается — не совпало, значит запрос
+# честно падает с 402, а не молча продолжает.
 _AFFORDABLE = re.compile(r"can only afford (\d+)")
 # Запас до границы бюджета и минимум, ниже которого запрос бессмыслен.
 _BUDGET_MARGIN = 256
@@ -44,14 +42,14 @@ class OpenAICompatibleGateway:
 
     def __init__(self) -> None:
         headers = {
-            "Authorization": f"Bearer {settings.effective_llm_key}",
+            "Authorization": f"Bearer {settings.llm_api_key}",
             "Content-Type": "application/json",
         }
-        # Необязательная атрибуция (её читает OpenRouter; другие игнорируют).
+        # Необязательная атрибуция: часть провайдеров её читает, прочие игнорируют.
         if settings.llm_site_url:
             headers["HTTP-Referer"] = settings.llm_site_url
         if settings.llm_site_title:
-            headers["X-OpenRouter-Title"] = settings.llm_site_title
+            headers["X-Title"] = settings.llm_site_title
         self._client = httpx.Client(
             base_url=settings.llm_base_url,
             headers=headers,
@@ -142,7 +140,7 @@ class OpenAICompatibleGateway:
     ) -> dict[str, Any]:
         grade_schema = rubric.schema.get("grade_schema") or {"type": "object", "properties": {}}
         grade = self._call_tool(
-            settings.llm_model_scoring,
+            rubric.model or settings.llm_model_scoring,
             "submit_grade",
             "Вернуть оценку строго по рубрике.",
             grade_schema,

@@ -6,6 +6,6 @@ __pycache__/
 .pytest_cache/
 
 # Env / secrets
-.env
+.env*
 
 # Данные контейнеров и оркестрация docker-compose — в суперпроекте (корень), не здесь.
