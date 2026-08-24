@@ -1,4 +1,4 @@
-"""Транспорт OpenRouter: живучесть на нестабильной сети и при таящем кредите.
+"""Транспорт LLM-провайдера: живучесть на нестабильной сети и при таящем кредите.
 
 Сетевых вызовов здесь нет — подменяется httpx-клиент.
 """
@@ -10,7 +10,7 @@ import json
 import httpx
 import pytest
 
-from core.ai_gateway.openrouter import _ATTEMPTS, OpenRouterAIGateway
+from core.ai_gateway.openai_compatible import _ATTEMPTS, OpenAICompatibleGateway
 
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
@@ -61,8 +61,8 @@ class FakeClient:
         return item
 
 
-def _gateway(*responses) -> tuple[OpenRouterAIGateway, FakeClient]:
-    gw = OpenRouterAIGateway.__new__(OpenRouterAIGateway)  # без сетевого __init__
+def _gateway(*responses) -> tuple[OpenAICompatibleGateway, FakeClient]:
+    gw = OpenAICompatibleGateway.__new__(OpenAICompatibleGateway)  # без сетевого __init__
     fake = FakeClient(*responses)
     gw._client = fake
     return gw, fake
@@ -84,7 +84,7 @@ def test_max_tokens_is_always_sent():
 
 
 def test_network_failure_is_retried():
-    """Канал до openrouter.ai рвётся через раз — одна потеря не должна ронять запрос."""
+    """Канал до провайдера рвётся через раз — одна потеря не должна ронять запрос."""
     gw, fake = _gateway(httpx.ConnectTimeout("tls"), _tool_response({"ok": True}))
 
     assert gw.structured("t", "d", SCHEMA, "p") == {"ok": True}
@@ -143,3 +143,30 @@ def test_broken_json_in_arguments_is_reported():
 
     with pytest.raises(RuntimeError, match="невалидный JSON"):
         gw.structured("t", "d", SCHEMA, "p")
+
+
+# ---- выбор провайдера ----
+
+
+def test_old_openrouter_key_is_reused_only_for_openrouter(monkeypatch):
+    """Ключ одного сервиса не должен уходить в другой: это выглядело бы как
+    «неверный ключ» вместо честной ошибки настройки."""
+    from core.config import Settings
+
+    at_openrouter = Settings(
+        llm_api_key="", openrouter_api_key="sk-old", llm_base_url="https://openrouter.ai/api/v1"
+    )
+    elsewhere = Settings(
+        llm_api_key="", openrouter_api_key="sk-old", llm_base_url="https://routerai.ru/api/v1"
+    )
+
+    assert at_openrouter.effective_llm_key == "sk-old"
+    assert elsewhere.effective_llm_key == ""
+
+
+def test_explicit_key_always_wins():
+    from core.config import Settings
+
+    s = Settings(llm_api_key="sk-new", openrouter_api_key="sk-old")
+
+    assert s.effective_llm_key == "sk-new"

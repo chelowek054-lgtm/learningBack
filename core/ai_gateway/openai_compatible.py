@@ -1,8 +1,11 @@
-"""OpenRouterAIGateway — доступ к моделям через OpenAI-совместимый протокол.
+"""Гейтвей к любому провайдеру с OpenAI-совместимым API.
 
-Отдельная реализация, а не настройка ClaudeAIGateway: у OpenRouter другой формат
-запроса (chat/completions + function calling), подменой base_url в SDK
-`anthropic` его не покрыть.
+Одна реализация на всех: OpenRouter, RouterAI и подобные говорят одинаково —
+`POST {base_url}/chat/completions` с Bearer-ключом и tool calling. Провайдер
+задаётся адресом и слагом модели в конфиге, а не отдельным классом.
+
+Отдельно от ClaudeAIGateway: у Anthropic другой формат запроса, подменой
+base_url в их SDK его не покрыть.
 
 Контракт тот же (`AIGateway`), поэтому модулям всё равно, кто отвечает:
 предметные схемы и промпты остаются в модулях, здесь только транспорт.
@@ -27,30 +30,32 @@ from core.config import settings
 from core.models import Rubric
 
 _ATTEMPTS = 3
-# OpenRouter в тексте 402 сообщает, на сколько токенов хватает остатка.
+# Провайдер в тексте 402 сообщает, на сколько токенов хватает остатка
+# (так делает OpenRouter; у других формулировка может отличаться — тогда
+# просто не совпадёт и запрос честно упадёт с 402).
 _AFFORDABLE = re.compile(r"can only afford (\d+)")
 # Запас до границы бюджета и минимум, ниже которого запрос бессмыслен.
 _BUDGET_MARGIN = 256
 _MIN_TOKENS = 512
 
 
-class OpenRouterAIGateway:
-    """Вызовы моделей OpenRouter со structured output через tool calling."""
+class OpenAICompatibleGateway:
+    """Вызовы модели со structured output через tool calling."""
 
     def __init__(self) -> None:
         headers = {
-            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "Authorization": f"Bearer {settings.effective_llm_key}",
             "Content-Type": "application/json",
         }
-        # Необязательная атрибуция в рейтингах OpenRouter.
-        if settings.openrouter_site_url:
-            headers["HTTP-Referer"] = settings.openrouter_site_url
-        if settings.openrouter_site_title:
-            headers["X-OpenRouter-Title"] = settings.openrouter_site_title
+        # Необязательная атрибуция (её читает OpenRouter; другие игнорируют).
+        if settings.llm_site_url:
+            headers["HTTP-Referer"] = settings.llm_site_url
+        if settings.llm_site_title:
+            headers["X-OpenRouter-Title"] = settings.llm_site_title
         self._client = httpx.Client(
-            base_url=settings.openrouter_base_url,
+            base_url=settings.llm_base_url,
             headers=headers,
-            timeout=httpx.Timeout(settings.openrouter_timeout_seconds),
+            timeout=httpx.Timeout(settings.llm_timeout_seconds),
         )
 
     def _call_tool(
@@ -58,9 +63,9 @@ class OpenRouterAIGateway:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
-            # max_tokens ОБЯЗАТЕЛЕН: без него OpenRouter резервирует потолок контекста
+            # max_tokens ОБЯЗАТЕЛЕН: без него провайдер резервирует потолок контекста
             # модели и отклоняет запрос как неоплачиваемый.
-            "max_tokens": settings.openrouter_max_tokens,
+            "max_tokens": settings.llm_max_tokens,
             "messages": [{"role": "user", "content": prompt}],
             "tools": [
                 {
@@ -80,13 +85,13 @@ class OpenRouterAIGateway:
             try:
                 response = self._client.post("/chat/completions", json=payload)
             except httpx.TransportError as e:
-                last_error = f"сеть до OpenRouter недоступна ({type(e).__name__})"
+                last_error = f"сеть до провайдера недоступна ({type(e).__name__})"
                 continue
 
             if response.status_code == 402:
                 budget = self._affordable_budget(response.text)
                 if budget is None:
-                    raise RuntimeError(f"OpenRouter 402: {response.text[:220]}")
+                    raise RuntimeError(f"402 (кредита не хватает): {response.text[:220]}")
                 # Баланс тает по мере расходов — подстраиваем бюджет под остаток,
                 # иначе запрос отклоняется целиком, хотя денег на него хватает.
                 payload["max_tokens"] = budget
@@ -94,11 +99,11 @@ class OpenRouterAIGateway:
                 continue
 
             if response.status_code >= 400:
-                raise RuntimeError(f"OpenRouter {response.status_code}: {response.text[:220]}")
+                raise RuntimeError(f"HTTP {response.status_code}: {response.text[:220]}")
 
             body = response.json()
             if "error" in body:
-                raise RuntimeError(f"OpenRouter вернул ошибку: {str(body['error'])[:220]}")
+                raise RuntimeError(f"провайдер вернул ошибку: {str(body['error'])[:220]}")
 
             choice = (body.get("choices") or [{}])[0]
             message = choice.get("message") or {}
@@ -137,7 +142,7 @@ class OpenRouterAIGateway:
     ) -> dict[str, Any]:
         grade_schema = rubric.schema.get("grade_schema") or {"type": "object", "properties": {}}
         grade = self._call_tool(
-            settings.openrouter_model_scoring,
+            settings.llm_model_scoring,
             "submit_grade",
             "Вернуть оценку строго по рубрике.",
             grade_schema,
@@ -156,5 +161,5 @@ class OpenRouterAIGateway:
         self, tool_name: str, description: str, schema: dict[str, Any], prompt: str
     ) -> dict[str, Any]:
         return self._call_tool(
-            settings.openrouter_model_generation, tool_name, description, schema, prompt
+            settings.llm_model_generation, tool_name, description, schema, prompt
         )
