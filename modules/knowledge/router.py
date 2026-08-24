@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, status
 
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
+from core.models import Activity
 from modules.knowledge.ai import build_graph, expand_node
 from modules.knowledge.answer import score_answer
 from modules.knowledge.assessment import NotGroundable
@@ -14,6 +15,7 @@ from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph
+from modules.knowledge.study import start_step, submit_answer, weak_nodes
 from modules.knowledge.placement import (
     NoProbeAvailable,
     next_probe,
@@ -30,6 +32,7 @@ from modules.knowledge.schemas import (
     CourseIn,
     CourseStepDone,
     ExpandIn,
+    StepAnswerIn,
     OverrideIn,
     OwnNodeIn,
     PlacementAnswerIn,
@@ -314,6 +317,66 @@ def complete_step(
     mark_completed(session, course, str(body.concept_id))
     session.commit()
     return course_view(course)
+
+
+# ---- прохождение шага курса (KG5-05) ----
+def _course_of(session, user_id, domain) -> Course:
+    course = session.query(Course).filter_by(user_id=user_id, domain=domain).one_or_none()
+    if course is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "курс не построен")
+    return course
+
+
+@router.post("/course/{domain}/step/{concept_id}/start")
+def start_course_step(
+    domain: str, concept_id: str, user: CurrentUser, session: SessionDep
+) -> dict:
+    """Развернуть шаг в активности движка: теория, задания, карточка удержания."""
+    course = _course_of(session, user.id, domain)
+    try:
+        activities = start_step(session, user.id, course, concept_id)
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    session.commit()
+    return {
+        "conceptId": concept_id,
+        "activities": [
+            {
+                "id": str(a.id),
+                "type": a.type,
+                "connectivity": a.connectivity,
+                "payload": a.payload,
+            }
+            for a in activities
+        ],
+    }
+
+
+@router.post("/course/{domain}/step/{concept_id}/answer")
+def answer_course_step(
+    domain: str,
+    concept_id: str,
+    body: StepAnswerIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> dict:
+    """Ответ на активность узла: оценка → event log → освоенность → прогресс курса."""
+    course = _course_of(session, user.id, domain)
+    activity = session.get(Activity, str(body.activity_id))
+    if activity is None or activity.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "activity не найдена")
+    try:
+        result = submit_answer(session, user.id, course, concept_id, activity, body.answer)
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    session.commit()
+    return result
+
+
+@router.get("/course/{domain}/weak")
+def read_weak_nodes(domain: str, user: CurrentUser, session: SessionDep) -> list[dict]:
+    """Узлы, которые ответы вернули в работу — вход для повторного прохода."""
+    return weak_nodes(session, user.id, domain)
 
 
 # ---- рост ветки под интересы (COW) ----

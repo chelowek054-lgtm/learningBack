@@ -96,3 +96,8 @@ class CourseIn(BaseModel):
 
 class CourseStepDone(BaseModel):
     concept_id: uuid.UUID
+
+
+class StepAnswerIn(BaseModel):
+    activity_id: uuid.UUID
+    answer: Any = None

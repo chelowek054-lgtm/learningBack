@@ -62,6 +62,7 @@ def insert_cards(
                 front=p["front"],
                 back=p["back"],
                 source=p["source"],
+                concept_id=p.get("concept_id"),
                 fsrs_state=initial_fsrs_state(now),
                 due_at=now,
             )

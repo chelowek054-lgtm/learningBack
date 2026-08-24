@@ -22,7 +22,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db import TS as _ts
@@ -103,11 +103,17 @@ class SrsCard(Base):
     front: Mapped[dict] = mapped_column(JSONB, nullable=False)
     back: Mapped[dict] = mapped_column(JSONB, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False)  # error_log|awl|imported|generated
+    # Узел графа, к которому относится карточка. Nullable: карточки Фазы 1
+    # (AWL, ошибки из эссе) к графу не привязаны.
+    concept_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     fsrs_state: Mapped[dict] = mapped_column(JSONB, nullable=False)
     due_at: Mapped[datetime] = mapped_column(_ts, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
-    __table_args__ = (Index("idx_srs_user_due", "user_id", "due_at"),)
+    __table_args__ = (
+        Index("idx_srs_user_due", "user_id", "due_at"),
+        Index("idx_srs_card_concept", "user_id", "concept_id"),
+    )
 
 
 class Job(Base):

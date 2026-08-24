@@ -54,6 +54,9 @@ def engine():
     url = _test_database_url()
     _ensure_database(url)
     eng = create_engine(url, pool_pre_ping=True, future=True)
+    # Пересоздаём схему целиком: create_all не эволюционирует существующие таблицы,
+    # и добавленная в модель колонка молча не появлялась бы в тестовой базе.
+    Base.metadata.drop_all(eng)
     Base.metadata.create_all(eng)
     yield eng
     eng.dispose()
