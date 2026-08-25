@@ -30,6 +30,9 @@ def resolve_node(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
             "mastery": uc.mastery if uc else {},
             "status": uc.status if uc else "locked",
             "origin": uc.origin if uc else "inherited",
+            # Статус модерации канона (draft — построено LLM, куратор ещё не
+            # смотрел). Отдельно от status выше: тот про персональный слой.
+            "reviewStatus": c.status,
         }
     # собственный персональный узел (base_concept_id = null)
     assert uc is not None

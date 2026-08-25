@@ -10,8 +10,9 @@ import pytest
 from modules.knowledge.models import Concept
 from tests.conftest import make_user
 
+# build здесь НЕ перечислен: пустую область заводит любой пользователь,
+# правило для него отдельное — см. тесты ниже.
 CANON_WRITES = [
-    ("post", "/graph/canon/build", {"domain": "ml", "topic": "t"}),
     (
         "post",
         "/graph/canon/nodes",
@@ -67,6 +68,61 @@ def test_approve_is_admin_only(session, client):
         f"/graph/canon/nodes/{c.id}/approve", json={"tier": "core"}
     )
     assert allowed.status_code == 200
+
+
+def test_regular_user_builds_an_empty_domain(session, client):
+    """Предмет выбирает пользователь — значит, и завести его он должен сам.
+
+    Пока это было закрыто админом, выбор нового предмета упирался в тупик:
+    карты нет, построить некому, и «появится, как только будет готова» не
+    сбывалось никогда.
+    """
+    api = client(make_user(session))
+
+    response = api.post("/graph/canon/build", json={"domain": "рыбалка", "topic": "Рыбалка"})
+
+    assert response.status_code == 200
+
+
+def test_built_nodes_are_unmoderated(session, client):
+    """Построенное пользователем — черновик: куратор ещё не смотрел."""
+    api = client(make_user(session))
+    api.post("/graph/canon/build", json={"domain": "рыбалка", "topic": "Рыбалка"})
+
+    built = session.query(Concept).filter_by(domain="рыбалка").all()
+    assert built, "граф должен был появиться"
+    assert {c.status for c in built} == {"draft"}
+
+
+def test_regular_user_cannot_rebuild_an_existing_domain(session, client):
+    """Канон общий: переписывать уже построенное вправе только куратор."""
+    _concept(session, domain="ml")
+    api = client(make_user(session))
+
+    response = api.post("/graph/canon/build", json={"domain": "ml", "topic": "t"})
+
+    assert response.status_code == 403
+
+
+def test_regular_user_cannot_refresh(session, client):
+    """refresh перегенерирует теорию — это правка курированного контента."""
+    api = client(make_user(session))
+
+    response = api.post(
+        "/graph/canon/build", json={"domain": "новая", "topic": "t", "refresh": True}
+    )
+
+    assert response.status_code == 403
+
+
+def test_review_status_reaches_the_client(session, client):
+    """Без этого учащийся не отличит непроверенный черновик от вычитанного канона."""
+    _concept(session, title="Проверенный")
+    api = client(make_user(session))
+
+    nodes = api.get("/graph/ml").json()["nodes"]
+
+    assert nodes[0]["reviewStatus"] == "approved"
 
 
 def test_regular_user_can_read_the_graph(session, client):

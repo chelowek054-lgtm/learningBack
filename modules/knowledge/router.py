@@ -54,8 +54,23 @@ def get_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
 # Канон общий для всех пользователей, поэтому правит его только is_superuser.
 # Обычный пользователь работает со своим слоем (COW) — секция ниже.
 @router.post("/canon/build")
-def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep) -> dict:
-    """LLM-черновик графа темы → персист как canonical draft (идемпотентно по domain+title)."""
+def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> dict:
+    """LLM-черновик графа темы → персист как canonical draft (идемпотентно по domain+title).
+
+    Пустую область заводит любой пользователь: предмет выбирает он, и без этого
+    выбор упирался в тупик — карты нет, а построить её мог только администратор.
+    Узлы создаются со `status="draft"`, то есть непроверенными; вычитывает и
+    подтверждает их куратор (`/canon/nodes/{id}/approve`).
+
+    Достройка и `refresh` уже существующей области остаются за администратором:
+    канон общий, и переписывать курированный контент вправе только он.
+    """
+    already = session.query(Concept).filter_by(domain=body.domain).first() is not None
+    if (already or body.refresh) and not user.is_superuser:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Эта область уже построена — её изменения курирует администратор",
+        )
     draft = build_graph(body.domain, body.topic, body.max_nodes)
     key_to_id: dict[str, object] = {}
     for n in draft.get("nodes", []):
