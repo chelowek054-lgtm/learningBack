@@ -218,9 +218,7 @@ def generate_course(
     """Построить курс и сохранить его, заменив прежний по этому домену."""
     path = build_path(session, user_id, domain, target_bloom, interests)
 
-    course = (
-        session.query(Course).filter_by(user_id=user_id, domain=domain).one_or_none()
-    )
+    course = session.query(Course).filter_by(user_id=user_id, domain=domain).one_or_none()
     target = {"bloom": target_bloom, "concepts": [str(i) for i in (interests or [])]}
     if course is None:
         course = Course(user_id=user_id, domain=domain, target=target, path=path, progress={})
@@ -243,9 +241,7 @@ def _kept_progress(progress: Any, path: list[dict[str, Any]]) -> list[str]:
 def course_view(course: Course) -> dict[str, Any]:
     """Курс для клиента: путь, прогресс и что делать сейчас."""
     completed = set((course.progress or {}).get("completed") or [])
-    steps = [
-        {**step, "done": step["conceptId"] in completed} for step in (course.path or [])
-    ]
+    steps = [{**step, "done": step["conceptId"] in completed} for step in (course.path or [])]
     current = next((s for s in steps if not s["done"]), None)
     return {
         "domain": course.domain,

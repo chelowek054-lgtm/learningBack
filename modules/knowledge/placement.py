@@ -50,7 +50,9 @@ def probe_bloom(concept: Concept, target: str) -> str:
         raise ValueError(f"неизвестная ступень Блума: {target!r}")
     cap = BLOOM_LEVELS.index(target)
     available = [
-        b for b in (concept.bloom_levels or []) if b in BLOOM_LEVELS and BLOOM_LEVELS.index(b) <= cap
+        b
+        for b in (concept.bloom_levels or [])
+        if b in BLOOM_LEVELS and BLOOM_LEVELS.index(b) <= cap
     ]
     if not available:
         return BLOOM_LEVELS[0]
@@ -157,7 +159,5 @@ def placement_map(session: Session, user_id: uuid.UUID, domain: str) -> dict[str
         "domain": domain,
         "nodes": nodes,
         "summary": counts,
-        "coreCovered": all(
-            n["status"] == "known" for n in nodes if n["tier"] == "core"
-        ),
+        "coreCovered": all(n["status"] == "known" for n in nodes if n["tier"] == "core"),
     }

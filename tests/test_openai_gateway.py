@@ -21,9 +21,7 @@ def _tool_response(payload: dict, status: int = 200) -> httpx.Response:
             {
                 "finish_reason": "tool_calls",
                 "message": {
-                    "tool_calls": [
-                        {"function": {"name": "t", "arguments": json.dumps(payload)}}
-                    ]
+                    "tool_calls": [{"function": {"name": "t", "arguments": json.dumps(payload)}}]
                 },
             }
         ]
@@ -34,7 +32,9 @@ def _tool_response(payload: dict, status: int = 200) -> httpx.Response:
 def _text_response(finish_reason: str = "length") -> httpx.Response:
     return httpx.Response(
         200,
-        json={"choices": [{"finish_reason": finish_reason, "message": {"content": "просто текст"}}]},
+        json={
+            "choices": [{"finish_reason": finish_reason, "message": {"content": "просто текст"}}]
+        },
     )
 
 

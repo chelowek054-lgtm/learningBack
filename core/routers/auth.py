@@ -47,8 +47,10 @@ def register(body: RegisterIn, session: SessionDep) -> TokenOut:
 @router.post("/login", response_model=TokenOut)
 def login(body: LoginIn, session: SessionDep) -> TokenOut:
     user = session.query(User).filter(User.email == body.email).first()
-    if user is None or user.password_hash is None or not verify_password(
-        body.password, user.password_hash
+    if (
+        user is None
+        or user.password_hash is None
+        or not verify_password(body.password, user.password_hash)
     ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный email или пароль")
     return TokenOut(access_token=create_access_token(str(user.id)))
@@ -100,7 +102,9 @@ def password_reset_confirm(body: PasswordResetConfirmIn, session: SessionDep) ->
     if entry is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код недействителен или просрочен")
     if entry.attempts >= settings.password_reset_max_attempts:
-        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, запросите новый код")
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, запросите новый код"
+        )
     if not secrets.compare_digest(entry.code, body.code):
         entry.attempts += 1
         session.commit()

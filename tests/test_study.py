@@ -146,9 +146,7 @@ def test_weak_answer_returns_the_node_through_retention(session):
     user, concept, course = _prepared(session)
     activity = _recall(start_step(session, user.id, course, str(concept.id)))
 
-    result = submit_answer(
-        session, user.id, course, str(concept.id), activity, "совершенно не то"
-    )
+    result = submit_answer(session, user.id, course, str(concept.id), activity, "совершенно не то")
 
     assert result["score"] < 0.6
     card = session.query(SrsCard).filter_by(user_id=user.id, concept_id=concept.id).one()
@@ -205,7 +203,10 @@ def test_mastered_nodes_drop_out_of_the_weak_list(session):
     user = make_user(session)
     concept = _c(session)
     save_state(
-        session, user.id, "ml", concept.id,
+        session,
+        user.id,
+        "ml",
+        concept.id,
         MasteryState(alpha=20, beta=1, observations=20),
     )
 

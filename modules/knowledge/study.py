@@ -51,9 +51,7 @@ def _connectivity(activity_type: str) -> str:
 
 
 def _step_of(course: Course, concept_id: str) -> dict[str, Any] | None:
-    return next(
-        (s for s in (course.path or []) if s["conceptId"] == concept_id), None
-    )
+    return next((s for s in (course.path or []) if s["conceptId"] == concept_id), None)
 
 
 def start_step(

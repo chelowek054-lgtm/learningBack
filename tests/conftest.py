@@ -63,9 +63,7 @@ def _ensure_database(url: str) -> None:
     base, _, name = url.rpartition("/")
     admin_dsn = f"{base}/postgres".replace("postgresql+psycopg://", "postgresql://")
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        exists = conn.execute(
-            "select 1 from pg_database where datname = %s", (name,)
-        ).fetchone()
+        exists = conn.execute("select 1 from pg_database where datname = %s", (name,)).fetchone()
         if not exists:
             conn.execute(f'CREATE DATABASE "{name}"')
 

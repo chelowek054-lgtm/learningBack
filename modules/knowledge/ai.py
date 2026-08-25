@@ -83,8 +83,13 @@ GRAPH_IO_SCHEMA: dict[str, Any] = {
                     "type": {
                         "type": "string",
                         "enum": [
-                            "prereq", "specializes", "part_of",
-                            "related", "contrasts", "misconception", "example",
+                            "prereq",
+                            "specializes",
+                            "part_of",
+                            "related",
+                            "contrasts",
+                            "misconception",
+                            "example",
                         ],
                     },
                 },

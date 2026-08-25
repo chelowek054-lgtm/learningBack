@@ -33,9 +33,7 @@ def process_job(session: Session, job: Job, gateway: AIGateway) -> None:
             raise ValueError(f"Рубрика не найдена: {rubric_id}")
 
         activity = session.get(Activity, response.activity_id)
-        grade = gateway.grade(
-            rubric, activity.payload if activity else {}, response.user_answer
-        )
+        grade = gateway.grade(rubric, activity.payload if activity else {}, response.user_answer)
 
         response.grade = grade
         # Ошибки → карточки SRS (error-log).

@@ -145,11 +145,7 @@ def prerequisite_map(session: Session, domain: str) -> dict[uuid.UUID, list[uuid
     """concept_id → список его предпосылок внутри домена."""
     ids = {c.id for c in session.query(Concept).filter(Concept.domain == domain).all()}
     result: dict[uuid.UUID, list[uuid.UUID]] = {i: [] for i in ids}
-    edges = (
-        session.query(ConceptEdge)
-        .filter(ConceptEdge.type.in_(PREREQ_EDGE_TYPES))
-        .all()
-    )
+    edges = session.query(ConceptEdge).filter(ConceptEdge.type.in_(PREREQ_EDGE_TYPES)).all()
     for e in edges:
         if e.from_id in ids and e.to_id in ids:
             result[e.to_id].append(e.from_id)
@@ -198,11 +194,7 @@ def save_state(
     state: MasteryState,
 ) -> UserConcept:
     """Записать освоенность, заведя персональную строку при необходимости (COW)."""
-    row = (
-        session.query(UserConcept)
-        .filter_by(user_id=user_id, base_concept_id=concept_id)
-        .first()
-    )
+    row = session.query(UserConcept).filter_by(user_id=user_id, base_concept_id=concept_id).first()
     if row is None:
         row = UserConcept(
             user_id=user_id,

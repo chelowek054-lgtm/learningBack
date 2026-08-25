@@ -71,9 +71,7 @@ def test_groundable_requires_sections_or_a_real_summary():
     """Один короткий summary — ярлык, а не контейнер знания."""
     assert NodeContent(summary="коротко").is_groundable() is False
     assert NodeContent(summary="x" * 120).is_groundable() is True
-    assert (
-        NodeContent(sections=[{"heading": "h", "body": "b"}]).is_groundable() is True
-    )
+    assert NodeContent(sections=[{"heading": "h", "body": "b"}]).is_groundable() is True
 
 
 def test_api_rejects_malformed_content(session, client):
@@ -154,7 +152,9 @@ def test_build_does_not_overwrite_usable_theory(session, client):
         tier="core",
         content={
             "summary": "Моя формулировка",
-            "sections": [{"heading": "Раздел", "body": "Текст", "examples": [], "counter_examples": []}],
+            "sections": [
+                {"heading": "Раздел", "body": "Текст", "examples": [], "counter_examples": []}
+            ],
             "references": [],
         },
         bloom_levels=[],

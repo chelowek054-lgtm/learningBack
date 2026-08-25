@@ -127,9 +127,7 @@ def render_content(title: str, content: NodeContent) -> str:
     return "\n".join(lines)
 
 
-def generate_assessment(
-    title: str, raw_content: Any, bloom: str, kind: str
-) -> AssessmentPayload:
+def generate_assessment(title: str, raw_content: Any, bloom: str, kind: str) -> AssessmentPayload:
     """Задания по теории узла. Без ключа — детерминированные, но тоже заземлённые."""
     validate_request(bloom, kind)
     content = NodeContent.model_validate(coerce_content(raw_content))
@@ -185,9 +183,7 @@ def _parse_items(raw: Any) -> list[AssessmentItem]:
 # разрабатывать и тестировать без обращения к LLM.
 
 
-def _fixture_items(
-    title: str, content: NodeContent, bloom: str, kind: str
-) -> list[AssessmentItem]:  # noqa: ARG001
+def _fixture_items(title: str, content: NodeContent, bloom: str, kind: str) -> list[AssessmentItem]:  # noqa: ARG001
     first = content.sections[0] if content.sections else None
 
     # Ветвимся по СТУПЕНИ, а не по форме: probe может прийти на любой ступени,

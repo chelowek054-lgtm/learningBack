@@ -27,7 +27,9 @@ THEORY = {
 }
 
 
-def _c(session, title, *, tier="derived", centrality=0.0, blooms=("remember", "understand", "apply")):
+def _c(
+    session, title, *, tier="derived", centrality=0.0, blooms=("remember", "understand", "apply")
+):
     c = Concept(
         domain="ml",
         title=title,
@@ -51,7 +53,10 @@ def _edge(session, a, b, kind="prereq"):
 
 def _mastered(session, user, concept, *, bloom="understand"):
     save_state(
-        session, user.id, "ml", concept.id,
+        session,
+        user.id,
+        "ml",
+        concept.id,
         MasteryState(alpha=20, beta=1, observations=20, bloom_reached=bloom),
     )
 
@@ -113,7 +118,9 @@ def test_node_never_precedes_its_prerequisite(session):
     path = build_path(session, user.id, "ml", "understand")
 
     assert _titles(path) == ["A", "B", "C"]
-    assert {s["reason"] for s in path} == {DIFFERENTIATION}, "ни ядра, ни интересов — чистая дифференциация"
+    assert {s["reason"] for s in path} == {DIFFERENTIATION}, (
+        "ни ядра, ни интересов — чистая дифференциация"
+    )
 
 
 def test_specializes_also_orders_the_path(session):
@@ -330,8 +337,6 @@ def test_reading_a_course_that_was_never_built_is_404(session, client):
 def test_endpoint_rejects_an_unknown_bloom(session, client):
     _c(session, "A")
 
-    response = client(make_user(session)).post(
-        "/graph/course/ml", json={"target_bloom": "выдумка"}
-    )
+    response = client(make_user(session)).post("/graph/course/ml", json={"target_bloom": "выдумка"})
 
     assert response.status_code == 422

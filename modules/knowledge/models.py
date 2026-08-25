@@ -25,10 +25,14 @@ class Concept(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     domain: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
-    tier: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'derived'"))  # core|derived
+    tier: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'derived'")
+    )  # core|derived
     centrality: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
     content: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    bloom_levels: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    bloom_levels: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     difficulty: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     source: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'llm'"))
     confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
@@ -123,5 +127,7 @@ class Course(Base):
     domain: Mapped[str] = mapped_column(String, nullable=False)
     target: Mapped[dict] = mapped_column(JSONB, nullable=False)  # {concepts[], bloom}
     path: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
-    progress: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    progress: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())

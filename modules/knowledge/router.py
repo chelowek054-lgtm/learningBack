@@ -59,9 +59,7 @@ def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep)
     draft = build_graph(body.domain, body.topic, body.max_nodes)
     key_to_id: dict[str, object] = {}
     for n in draft.get("nodes", []):
-        existing = (
-            session.query(Concept).filter_by(domain=body.domain, title=n["title"]).first()
-        )
+        existing = session.query(Concept).filter_by(domain=body.domain, title=n["title"]).first()
         if existing:
             key_to_id[n["key"]] = existing.id
             # Узел уже есть, но без пригодной теории — дополняем, если черновик лучше.
@@ -91,9 +89,11 @@ def build_canon(body: BuildGraphIn, user: CurrentSuperuser, session: SessionDep)
         key_to_id[n["key"]] = c.id
     for e in draft.get("edges", []):
         f, t = key_to_id.get(e["from"]), key_to_id.get(e["to"])
-        if f and t and not session.query(ConceptEdge).filter_by(
-            from_id=f, to_id=t, type=e["type"]
-        ).first():
+        if (
+            f
+            and t
+            and not session.query(ConceptEdge).filter_by(from_id=f, to_id=t, type=e["type"]).first()
+        ):
             session.add(ConceptEdge(from_id=f, to_id=t, type=e["type"]))
     session.commit()
     return effective_graph(session, user.id, body.domain)
@@ -285,14 +285,10 @@ def placement_state(domain: str, user: CurrentUser, session: SessionDep) -> dict
 
 # ---- курс: путь по графу до цели (KG5) ----
 @router.post("/course/{domain}")
-def create_course(
-    domain: str, body: CourseIn, user: CurrentUser, session: SessionDep
-) -> dict:
+def create_course(domain: str, body: CourseIn, user: CurrentUser, session: SessionDep) -> dict:
     """Собрать курс от текущей границы знаний до заявленной ступени."""
     try:
-        course = generate_course(
-            session, user.id, domain, body.target_bloom, list(body.interests)
-        )
+        course = generate_course(session, user.id, domain, body.target_bloom, list(body.interests))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     session.commit()
@@ -328,9 +324,7 @@ def _course_of(session, user_id, domain) -> Course:
 
 
 @router.post("/course/{domain}/step/{concept_id}/start")
-def start_course_step(
-    domain: str, concept_id: str, user: CurrentUser, session: SessionDep
-) -> dict:
+def start_course_step(domain: str, concept_id: str, user: CurrentUser, session: SessionDep) -> dict:
     """Развернуть шаг в активности движка: теория, задания, карточка удержания."""
     course = _course_of(session, user.id, domain)
     try:

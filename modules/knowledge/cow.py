@@ -78,18 +78,26 @@ def effective_graph(session: Session, user_id: uuid.UUID, domain: str) -> dict[s
     )
     for e in canon_edges:
         edges.append(
-            {"id": str(e.id), "from": str(e.from_id), "to": str(e.to_id),
-             "type": e.type, "kind": "canonical"}
+            {
+                "id": str(e.id),
+                "from": str(e.from_id),
+                "to": str(e.to_id),
+                "type": e.type,
+                "kind": "canonical",
+            }
         )
     user_edges = (
-        session.query(UserEdge)
-        .filter(UserEdge.user_id == user_id, UserEdge.domain == domain)
-        .all()
+        session.query(UserEdge).filter(UserEdge.user_id == user_id, UserEdge.domain == domain).all()
     )
     for ue in user_edges:
         edges.append(
-            {"id": str(ue.id), "from": str(ue.from_id), "to": str(ue.to_id),
-             "type": ue.type, "kind": "personal"}
+            {
+                "id": str(ue.id),
+                "from": str(ue.from_id),
+                "to": str(ue.to_id),
+                "type": ue.type,
+                "kind": "personal",
+            }
         )
 
     return {"domain": domain, "nodes": nodes, "edges": edges}

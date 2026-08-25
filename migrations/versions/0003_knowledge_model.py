@@ -30,7 +30,9 @@ def upgrade() -> None:
         sa.Column("tier", sa.String(), server_default=sa.text("'derived'"), nullable=False),
         sa.Column("centrality", sa.Float(), server_default=sa.text("0"), nullable=False),
         sa.Column("content", pg.JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
-        sa.Column("bloom_levels", pg.JSONB(), server_default=sa.text("'[]'::jsonb"), nullable=False),
+        sa.Column(
+            "bloom_levels", pg.JSONB(), server_default=sa.text("'[]'::jsonb"), nullable=False
+        ),
         sa.Column("difficulty", sa.Integer(), server_default=sa.text("1"), nullable=False),
         sa.Column("source", sa.String(), server_default=sa.text("'llm'"), nullable=False),
         sa.Column("confidence", sa.Float(), server_default=sa.text("0"), nullable=False),

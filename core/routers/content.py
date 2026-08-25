@@ -16,6 +16,5 @@ def list_materials(user: CurrentUser, session: SessionDep) -> list[dict]:
         .all()
     )
     return [
-        {"id": str(m.id), "module": m.module, "title": m.title, "content": m.content}
-        for m in rows
+        {"id": str(m.id), "module": m.module, "title": m.title, "content": m.content} for m in rows
     ]

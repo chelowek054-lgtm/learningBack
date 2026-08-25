@@ -24,6 +24,5 @@ AWL_STARTER: list[tuple[str, str]] = [
 def awl_card_partials() -> list[dict[str, Any]]:
     """Заготовки карточек AWL (front/back/source)."""
     return [
-        {"front": {"word": w}, "back": {"definition": d}, "source": "awl"}
-        for w, d in AWL_STARTER
+        {"front": {"word": w}, "back": {"definition": d}, "source": "awl"} for w, d in AWL_STARTER
     ]
