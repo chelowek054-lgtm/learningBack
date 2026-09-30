@@ -1,4 +1,4 @@
-"""ORM-модели ядра Praxis (8 таблиц). См. docs/architecture/02-logical.md §2.1.
+"""ORM-модели ядра Praxis (9 таблиц). См. docs/architecture/02-logical.md §2.1.
 
 Модель знаний (граф) — НЕ здесь: она данные модуля, см. modules/knowledge/models.py.
 
@@ -161,3 +161,21 @@ class Rubric(Base):
     schema: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
     __table_args__ = (PrimaryKeyConstraint("id", "version"),)
+
+
+class LlmUsage(Base):
+    """Расход токенов на один ответ провайдера (FR-AI-05)."""
+
+    __tablename__ = "llm_usage"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    purpose: Mapped[str] = mapped_column(String, nullable=False)  # инструмент/рубрика вызова
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    completion_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_llm_usage_user_created", "user_id", "created_at"),)

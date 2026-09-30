@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from core import usage
 from core.ai_gateway.base import render_prompt
 from core.config import settings
 from core.models import Rubric
@@ -102,6 +103,9 @@ class OpenAICompatibleGateway:
             body = response.json()
             if "error" in body:
                 raise RuntimeError(f"провайдер вернул ошибку: {str(body['error'])[:220]}")
+
+            # Платим за любой ответ, в том числе за тот, где модель не вызвала инструмент.
+            usage.record(model=model, purpose=tool_name, usage=body.get("usage"))
 
             choice = (body.get("choices") or [{}])[0]
             message = choice.get("message") or {}

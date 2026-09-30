@@ -10,7 +10,9 @@ from core.admin import setup_admin
 from core import modules
 from core.config import settings
 from core.db import SessionLocal
+from core.usage import UserContextMiddleware
 from core.routers import auth, content, jobs, sync
+from core.routers import usage as usage_router
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +43,7 @@ _origins = (
     if settings.cors_origins.strip() == "*"
     else [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 )
+app.add_middleware(UserContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -53,6 +56,7 @@ app.include_router(sync.router)
 app.include_router(jobs.router)
 app.include_router(content.router)
 app.include_router(auth.router)
+app.include_router(usage_router.router)
 for module_router in modules.routers():
     app.include_router(module_router)
 
