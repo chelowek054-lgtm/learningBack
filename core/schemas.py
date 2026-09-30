@@ -98,6 +98,7 @@ class SrsCardIO(_CamelModel):
     fsrs_state: dict[str, Any]
     due_at: datetime
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class SyncPushIn(_CamelModel):

@@ -20,11 +20,9 @@ import argparse
 import getpass
 import os
 import sys
-from datetime import datetime, timezone
 
 from core.db import SessionLocal
 from core.models import User
-from core.provisioning import provision_new_user
 from core.security import hash_password
 
 MIN_PASSWORD_LENGTH = 6
@@ -112,8 +110,6 @@ def main() -> None:
         )
         session.add(user)
         session.flush()
-        # Тот же провижининг, что и при обычной регистрации: админ — тоже пользователь.
-        provision_new_user(session, user.id, datetime.now(timezone.utc))
         session.commit()
         print(f"Администратор «{email}» создан. Вход: /admin")
 

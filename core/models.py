@@ -1,4 +1,4 @@
-"""ORM-модели ядра Praxis (8 таблиц). См. docs/architecture/02-logical.md §2.1.
+"""ORM-модели ядра Praxis (10 таблиц). См. docs/architecture/02-logical.md §2.1.
 
 Модель знаний (граф) — НЕ здесь: она данные модуля, см. modules/knowledge/models.py.
 
@@ -109,6 +109,8 @@ class SrsCard(Base):
     fsrs_state: Mapped[dict] = mapped_column(JSONB, nullable=False)
     due_at: Mapped[datetime] = mapped_column(_ts, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    # Момент последнего изменения состояния: по нему решается LWW при push.
+    updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (
         Index("idx_srs_user_due", "user_id", "due_at"),
@@ -128,6 +130,8 @@ class Job(Base):
     input_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
     result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # Не раньше этого момента задачу пробуют снова (после временного сбоя).
+    retry_after: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
@@ -161,3 +165,31 @@ class Rubric(Base):
     schema: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
     __table_args__ = (PrimaryKeyConstraint("id", "version"),)
+
+
+class LlmUsage(Base):
+    """Расход токенов на один ответ провайдера (FR-AI-05)."""
+
+    __tablename__ = "llm_usage"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    purpose: Mapped[str] = mapped_column(String, nullable=False)  # инструмент/рубрика вызова
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    completion_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_llm_usage_user_created", "user_id", "created_at"),)
+
+
+class LlmCache(Base):
+    """Кэш детерминированных ответов LLM: ключ — хэш (модель, инструмент, схема, промпт)."""
+
+    __tablename__ = "llm_cache"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())

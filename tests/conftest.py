@@ -53,6 +53,39 @@ def _no_live_llm() -> Iterator[None]:
         settings.llm_api_key = saved
 
 
+class _UsageSink:
+    """Вместо записи в БД стенда складывает строки учёта токенов в список."""
+
+    def __init__(self) -> None:
+        self.rows: list = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def add(self, row) -> None:
+        self.rows.append(row)
+
+    def get(self, *_args):
+        return None  # кэш LLM в тестах всегда пуст
+
+    def commit(self) -> None:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def usage_rows(monkeypatch) -> list:
+    """Учёт токенов не пишет в рабочую БД; тесты читают перехваченные строки."""
+    from core import llm_cache, usage
+
+    sink = _UsageSink()
+    monkeypatch.setattr(usage, "SessionLocal", lambda: sink)
+    monkeypatch.setattr(llm_cache, "SessionLocal", lambda: sink)
+    return sink.rows
+
+
 def _test_database_url() -> str:
     base, _, name = settings.database_url.rpartition("/")
     return f"{base}/{name}{TEST_DB_SUFFIX}"

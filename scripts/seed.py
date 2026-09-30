@@ -1,31 +1,16 @@
-"""Seed демо-контента (WS4): рубрики, стартовая колода AWL, ML-материал, демо-активности.
+"""Seed демо-контента для разработки: рубрики, демо-пользователь, AWL, ML-материал, активности.
 
-Идемпотентно. Запуск: uv run python -m scripts.seed
+Рубрики и так добавляются при старте API (core.modules.sync_rubrics); здесь они
+дублируются, чтобы seed работал и без запущенного API. Идемпотентно. Запуск: uv run python -m scripts.seed
 """
 
 from datetime import datetime, timezone
 
 from core.db import SessionLocal
-from core.models import Activity, Material, Rubric, User
+from core.models import Activity, Material, User
+from core.modules import sync_rubrics
 from core.srs import insert_cards
 from modules.languages.generators import awl_card_partials
-from modules.languages.rubrics import RUBRICS as LANG_RUBRICS
-from modules.ml.rubrics import RUBRICS as ML_RUBRICS
-
-
-def _seed_rubrics(s) -> None:
-    # Upsert: обновляем поля существующей рубрики (перекрывает старые заглушки Ф0).
-    for r in [*LANG_RUBRICS, *ML_RUBRICS]:
-        obj = s.query(Rubric).filter_by(id=r["id"], version=r["version"]).first()
-        if obj is None:
-            s.add(Rubric(**r))
-        else:
-            obj.module, obj.model, obj.prompt, obj.schema = (
-                r["module"],
-                r["model"],
-                r["prompt"],
-                r["schema"],
-            )
 
 
 def seed() -> None:
@@ -37,7 +22,7 @@ def seed() -> None:
             s.add(user)
             s.flush()
 
-        _seed_rubrics(s)
+        sync_rubrics(s)
 
         # Стартовая колода AWL (если у пользователя ещё нет awl-карточек).
         from core.models import SrsCard

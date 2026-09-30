@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from core import llm_cache, usage
 from core.ai_gateway.base import render_prompt
 from core.config import settings
 from core.models import Rubric
@@ -57,6 +58,23 @@ class OpenAICompatibleGateway:
         )
 
     def _call_tool(
+        self,
+        model: str,
+        tool_name: str,
+        description: str,
+        schema: dict[str, Any],
+        prompt: str,
+        cache: bool = False,
+    ) -> dict[str, Any]:
+        key = llm_cache.make_key(model, tool_name, schema, prompt) if cache else None
+        if key is not None and (hit := llm_cache.get(key)) is not None:
+            return hit
+        result = self._request_tool(model, tool_name, description, schema, prompt)
+        if key is not None:
+            llm_cache.put(key, result)
+        return result
+
+    def _request_tool(
         self, model: str, tool_name: str, description: str, schema: dict[str, Any], prompt: str
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -103,6 +121,9 @@ class OpenAICompatibleGateway:
             if "error" in body:
                 raise RuntimeError(f"провайдер вернул ошибку: {str(body['error'])[:220]}")
 
+            # Платим за любой ответ, в том числе за тот, где модель не вызвала инструмент.
+            usage.record(model=model, purpose=tool_name, usage=body.get("usage"))
+
             choice = (body.get("choices") or [{}])[0]
             message = choice.get("message") or {}
             calls = message.get("tool_calls") or []
@@ -145,6 +166,7 @@ class OpenAICompatibleGateway:
             "Вернуть оценку строго по рубрике.",
             grade_schema,
             render_prompt(rubric, activity_payload, answer),
+            cache=True,  # тот же ответ по той же рубрике — тот же результат
         )
         grade.setdefault("rubricId", rubric.id)
         grade.setdefault("rubricVersion", rubric.version)
@@ -156,8 +178,13 @@ class OpenAICompatibleGateway:
         return {"generator": generator_id, "items": []}
 
     def structured(
-        self, tool_name: str, description: str, schema: dict[str, Any], prompt: str
+        self,
+        tool_name: str,
+        description: str,
+        schema: dict[str, Any],
+        prompt: str,
+        cache: bool = False,
     ) -> dict[str, Any]:
         return self._call_tool(
-            settings.llm_model_generation, tool_name, description, schema, prompt
+            settings.llm_model_generation, tool_name, description, schema, prompt, cache=cache
         )

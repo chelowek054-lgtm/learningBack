@@ -191,7 +191,14 @@ def submit_answer(
             activity_id=activity.id,
             user_id=user_id,
             user_answer={"answer": answer},
-            grade={"score": score, "explanation": explanation, "conceptId": concept_id},
+            grade={
+                "score": score,
+                "explanation": explanation,
+                "conceptId": concept_id,
+                # Оценка помнит, по какой версии теории выставлена (NFR-06).
+                "conceptVersion": concept.version,
+                "bloom": bloom,
+            },
             local_created_at=datetime.now(timezone.utc),
             synced=True,
         )

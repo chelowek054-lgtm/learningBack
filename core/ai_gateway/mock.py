@@ -45,7 +45,12 @@ class MockAIGateway:
         return {"generator": generator_id, "items": []}
 
     def structured(
-        self, tool_name: str, description: str, schema: dict[str, Any], prompt: str
+        self,
+        tool_name: str,
+        description: str,
+        schema: dict[str, Any],
+        prompt: str,
+        cache: bool = False,
     ) -> dict[str, Any]:
         """Заглушка не умеет сочинять под произвольную схему: предметные фикстуры
         держат сами модули (см. modules/knowledge/ai.py)."""

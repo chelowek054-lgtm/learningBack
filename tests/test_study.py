@@ -129,6 +129,20 @@ def test_answer_lands_in_the_event_log(session):
     assert response.grade["conceptId"] == str(concept.id)
 
 
+def test_grade_remembers_the_node_version_it_was_given_for(session):
+    """Правка теории не должна задним числом менять смысл старых оценок (NFR-06)."""
+    user, concept, course = _prepared(session)
+    concept.version = 4
+    session.flush()
+    activity = _recall(start_step(session, user.id, course, str(concept.id)))
+
+    submit_answer(session, user.id, course, str(concept.id), activity, "ответ")
+
+    grade = session.query(Response).filter_by(user_id=user.id).one().grade
+    assert grade["conceptVersion"] == 4
+    assert grade["bloom"] == "understand"
+
+
 def test_answer_moves_mastery(session):
     user, concept, course = _prepared(session)
     activity = _recall(start_step(session, user.id, course, str(concept.id)))

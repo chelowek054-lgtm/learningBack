@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     llm_site_url: str = ""
     llm_site_title: str = "Praxis"
 
+    # Подключённые предметные модули (ADR-0019). Ядро про них ничего не знает:
+    # каждый пункт — пакет с объектом `backend` (наследник core.modules.BackendModule).
+    installed_modules: str = "modules.languages,modules.ml,modules.knowledge"
+
     # CORS: список origin через запятую, или "*" (для web-клиента Expo на :8081).
     cors_origins: str = "*"
 
@@ -66,6 +70,11 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-insecure-change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 30  # 30 дней (MVP «для себя»)
+
+    # Повтор AI-задач при временных сбоях: сколько попыток и базовая отсрочка
+    # (растёт вдвое с каждой неудачей).
+    job_max_attempts: int = 3
+    job_retry_backoff_seconds: int = 60
 
     # Админка (sqladmin): секрет cookie-сессии. Пусто → берётся jwt_secret.
     admin_session_secret: str = ""

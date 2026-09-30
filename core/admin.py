@@ -19,6 +19,7 @@ from core.db import SessionLocal, engine
 from core.models import (
     Activity,
     Job,
+    LlmUsage,
     Material,
     PasswordResetCode,
     Response,
@@ -142,6 +143,27 @@ class JobAdmin(ModelView, model=Job):
     column_sortable_list = [Job.updated_at]
 
 
+class LlmUsageAdmin(ModelView, model=LlmUsage):
+    name_plural = "Расход токенов"
+    icon = "fa-solid fa-coins"
+    category = "Ядро"
+    can_create = False
+    can_edit = False
+    column_list = [
+        LlmUsage.created_at,
+        LlmUsage.purpose,
+        LlmUsage.model,
+        LlmUsage.prompt_tokens,
+        LlmUsage.completion_tokens,
+    ]
+    column_filters = [
+        AllUniqueStringValuesFilter(LlmUsage.purpose, title="Назначение"),
+        AllUniqueStringValuesFilter(LlmUsage.model, title="Модель"),
+    ]
+    column_sortable_list = [LlmUsage.created_at, LlmUsage.prompt_tokens]
+    column_default_sort = [(LlmUsage.created_at, True)]
+
+
 class MaterialAdmin(ModelView, model=Material):
     name_plural = "Материалы"
     icon = "fa-solid fa-book"
@@ -169,6 +191,7 @@ _CORE_VIEWS = [
     ResponseAdmin,
     SrsCardAdmin,
     JobAdmin,
+    LlmUsageAdmin,
     MaterialAdmin,
     RubricAdmin,
 ]
@@ -176,7 +199,7 @@ _CORE_VIEWS = [
 
 def setup_admin(app) -> Admin:
     """Смонтировать /admin: каркас + таблицы ядра + представления модулей."""
-    from modules.knowledge.admin import VIEWS as KNOWLEDGE_VIEWS
+    from core import modules
 
     admin = Admin(
         app,
@@ -187,6 +210,6 @@ def setup_admin(app) -> Admin:
             secret_key=settings.admin_session_secret or settings.jwt_secret
         ),
     )
-    for view in [*_CORE_VIEWS, *KNOWLEDGE_VIEWS]:
+    for view in [*_CORE_VIEWS, *modules.admin_views()]:
         admin.add_view(view)
     return admin

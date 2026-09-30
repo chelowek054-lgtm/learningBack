@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 from core.ai_gateway import get_ai_gateway
 from core.deps import CurrentUser, SessionDep
-from core.jobs import process_job
+from core.jobs import due_jobs, process_job
 from core.models import Job
 from core.schemas import JobIO
 
@@ -20,8 +20,8 @@ def list_jobs(user: CurrentUser, session: SessionDep) -> list[Job]:
 @router.post("/process", response_model=list[JobIO])
 def process_pending(user: CurrentUser, session: SessionDep) -> list[Job]:
     gateway = get_ai_gateway()
-    pending = session.query(Job).filter(Job.user_id == user.id, Job.status == "pending").all()
-    for job in pending:
+    # Ручной запуск игнорирует отсрочку повтора.
+    for job in due_jobs(session, user.id, force=True):
         process_job(session, job, gateway)
     session.commit()
     return session.query(Job).filter(Job.user_id == user.id).all()
