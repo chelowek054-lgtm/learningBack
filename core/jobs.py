@@ -5,11 +5,9 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from core.ai_gateway import AIGateway, get_rubric
+from core.modules import grade_job_modules
 from core.models import Activity, Job, Response
 from core.srs import errors_to_card_partials, insert_cards
-
-# Типы job → модуль карточек, куда идут ошибки (error-log → SRS).
-_CARD_MODULE = {"grade_writing": "languages", "grade_concept": "ml"}
 
 
 def process_job(session: Session, job: Job, gateway: AIGateway) -> None:
@@ -19,7 +17,8 @@ def process_job(session: Session, job: Job, gateway: AIGateway) -> None:
     job.attempts += 1
 
     try:
-        if job.type not in _CARD_MODULE:
+        card_modules = grade_job_modules()
+        if job.type not in card_modules:
             raise ValueError(f"Неизвестный тип job: {job.type}")
 
         response_id = job.input_ref.get("responseId")
@@ -38,7 +37,7 @@ def process_job(session: Session, job: Job, gateway: AIGateway) -> None:
         response.grade = grade
         # Ошибки → карточки SRS (error-log).
         partials = errors_to_card_partials(grade.get("errors", []))
-        insert_cards(session, response.user_id, _CARD_MODULE[job.type], partials, now)
+        insert_cards(session, response.user_id, card_modules[job.type], partials, now)
 
         job.result = {"responseId": str(response.id), "cardsCreated": len(partials)}
         job.status = "done"

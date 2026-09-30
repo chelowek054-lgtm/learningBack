@@ -17,7 +17,7 @@ from core.schemas import (
     TokenOut,
     UserOut,
 )
-from core.provisioning import provision_new_user
+from core.modules import provision_subject
 from core.security import (
     create_access_token,
     generate_reset_code,
@@ -36,9 +36,6 @@ def register(body: RegisterIn, session: SessionDep) -> TokenOut:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email уже зарегистрирован")
     user = User(email=body.email, password_hash=hash_password(body.password), profile={})
     session.add(user)
-    session.flush()
-    # Провижининг: AWL-колода + демо-активности (полезно с первого входа).
-    provision_new_user(session, user.id, datetime.now(timezone.utc))
     session.commit()
     session.refresh(user)
     return TokenOut(access_token=create_access_token(str(user.id)))
@@ -123,6 +120,11 @@ def me(user: CurrentUser) -> User:
 @router.put("/me/profile", response_model=UserOut)
 def update_profile(body: ProfileIn, user: CurrentUser, session: SessionDep) -> User:
     user.profile = body.profile
+    # Стартовый контент зависит от предмета, а предмет известен только здесь:
+    # при регистрации его ещё нет (FR-SRS-05). Модули провижинят идемпотентно.
+    subject = body.profile.get("subject")
+    if isinstance(subject, dict) and subject.get("id"):
+        provision_subject(session, user.id, subject, datetime.now(timezone.utc))
     session.commit()
     session.refresh(user)
     return user

@@ -25,12 +25,23 @@ from core.schemas import (
 router = APIRouter(prefix="/sync", tags=["sync"])
 
 
+def _foreign(obj, user) -> bool:
+    """Запись с таким id уже принадлежит другому пользователю.
+
+    id генерирует клиент, поэтому чужой UUID нельзя принимать за «обновление
+    своей записи»: иначе push перехватывает чужие данные (SPEC-03, AC-03.10).
+    """
+    return obj is not None and obj.user_id != user.id
+
+
 @router.post("/push", response_model=SyncPushOut)
 def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOut:
     ack: list = []
 
     for a in body.activities:
         obj = session.get(Activity, a.id)
+        if _foreign(obj, user):
+            continue
         if obj is None:
             obj = Activity(id=a.id, user_id=user.id)
             session.add(obj)
@@ -47,6 +58,8 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
 
     for r in body.responses:
         obj = session.get(Response, r.id)
+        if _foreign(obj, user):
+            continue
         if obj is None:
             obj = Response(id=r.id, user_id=user.id)
             session.add(obj)
@@ -61,6 +74,8 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
 
     for c in body.srs_cards:
         obj = session.get(SrsCard, c.id)
+        if _foreign(obj, user):
+            continue
         if obj is None:
             obj = SrsCard(id=c.id, user_id=user.id)
             session.add(obj)
@@ -72,6 +87,8 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
     # Ставим jobs (идемпотентно по id).
     for j in body.jobs:
         obj = session.get(Job, j.id)
+        if _foreign(obj, user):
+            continue
         if obj is None:
             session.add(
                 Job(

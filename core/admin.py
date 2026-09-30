@@ -176,7 +176,7 @@ _CORE_VIEWS = [
 
 def setup_admin(app) -> Admin:
     """Смонтировать /admin: каркас + таблицы ядра + представления модулей."""
-    from modules.knowledge.admin import VIEWS as KNOWLEDGE_VIEWS
+    from core import modules
 
     admin = Admin(
         app,
@@ -187,6 +187,6 @@ def setup_admin(app) -> Admin:
             secret_key=settings.admin_session_secret or settings.jwt_secret
         ),
     )
-    for view in [*_CORE_VIEWS, *KNOWLEDGE_VIEWS]:
+    for view in [*_CORE_VIEWS, *modules.admin_views()]:
         admin.add_view(view)
     return admin
