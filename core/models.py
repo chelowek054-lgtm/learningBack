@@ -1,4 +1,4 @@
-"""ORM-модели ядра Praxis (9 таблиц). См. docs/architecture/02-logical.md §2.1.
+"""ORM-модели ядра Praxis (10 таблиц). См. docs/architecture/02-logical.md §2.1.
 
 Модель знаний (граф) — НЕ здесь: она данные модуля, см. modules/knowledge/models.py.
 
@@ -183,3 +183,13 @@ class LlmUsage(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (Index("idx_llm_usage_user_created", "user_id", "created_at"),)
+
+
+class LlmCache(Base):
+    """Кэш детерминированных ответов LLM: ключ — хэш (модель, инструмент, схема, промпт)."""
+
+    __tablename__ = "llm_cache"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())

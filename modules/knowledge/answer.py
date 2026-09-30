@@ -71,7 +71,7 @@ def _score_open(item: AssessmentItem, answer: str) -> tuple[float, str]:
         f"ЭТАЛОН: {item.expected}\n"
         f"ОТВЕТ УЧЕНИКА: {answer}"
     )
-    raw = get_ai_gateway().structured(_TOOL, _TOOL_DESC, ESTIMATE_IO_SCHEMA, prompt)
+    raw = get_ai_gateway().structured(_TOOL, _TOOL_DESC, ESTIMATE_IO_SCHEMA, prompt, cache=True)
     if not isinstance(raw, dict) or not isinstance(raw.get("score"), int | float):
         return _overlap_score(item.expected, answer)
     score = max(0.0, min(1.0, float(raw["score"])))

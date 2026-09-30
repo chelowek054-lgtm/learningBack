@@ -68,6 +68,9 @@ class _UsageSink:
     def add(self, row) -> None:
         self.rows.append(row)
 
+    def get(self, *_args):
+        return None  # кэш LLM в тестах всегда пуст
+
     def commit(self) -> None:
         pass
 
@@ -75,10 +78,11 @@ class _UsageSink:
 @pytest.fixture(autouse=True)
 def usage_rows(monkeypatch) -> list:
     """Учёт токенов не пишет в рабочую БД; тесты читают перехваченные строки."""
-    from core import usage
+    from core import llm_cache, usage
 
     sink = _UsageSink()
     monkeypatch.setattr(usage, "SessionLocal", lambda: sink)
+    monkeypatch.setattr(llm_cache, "SessionLocal", lambda: sink)
     return sink.rows
 
 

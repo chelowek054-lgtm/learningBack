@@ -54,9 +54,18 @@ class AIGateway(Protocol):
         ...
 
     def structured(
-        self, tool_name: str, description: str, schema: dict[str, Any], prompt: str
+        self,
+        tool_name: str,
+        description: str,
+        schema: dict[str, Any],
+        prompt: str,
+        cache: bool = False,
     ) -> dict[str, Any]:
         """Доменно-нейтральный structured output: вызов LLM с произвольной JSON-схемой.
+
+        `cache=True` разрешает отдать прежний результат на тот же вход. Включать
+        только там, где ответ детерминирован по входу (оценка): генерация, которую
+        просят «перестроить», кэшироваться не должна.
 
         Схемы и промпты предметных областей живут в модулях (например,
         modules/knowledge/ai.py), ядро про них не знает.
