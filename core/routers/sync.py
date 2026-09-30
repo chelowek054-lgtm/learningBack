@@ -6,6 +6,8 @@ Pull: сервер отдаёт свои изменения (grade'ы, сген�
 MVP: LWW перезаписью по id; `since`-оптимизация — позже.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter
 
 from core.ai_gateway import get_ai_gateway
@@ -80,8 +82,15 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
             obj = SrsCard(id=c.id, user_id=user.id)
             session.add(obj)
         obj.user_id = user.id
+        # LWW: более старую версию карточки не принимаем (но подтверждаем — клиенту
+        # её повторять незачем). Без времени изменения версия считается новейшей.
+        incoming = c.updated_at
+        if incoming is not None and obj.updated_at is not None and incoming < obj.updated_at:
+            ack.append(c.id)
+            continue
         obj.module, obj.front, obj.back, obj.source = c.module, c.front, c.back, c.source
         obj.fsrs_state, obj.due_at = c.fsrs_state, c.due_at
+        obj.updated_at = incoming or datetime.now(timezone.utc)
         ack.append(c.id)
 
     # Ставим jobs (идемпотентно по id).

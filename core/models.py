@@ -109,6 +109,8 @@ class SrsCard(Base):
     fsrs_state: Mapped[dict] = mapped_column(JSONB, nullable=False)
     due_at: Mapped[datetime] = mapped_column(_ts, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    # Момент последнего изменения состояния: по нему решается LWW при push.
+    updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (
         Index("idx_srs_user_due", "user_id", "due_at"),

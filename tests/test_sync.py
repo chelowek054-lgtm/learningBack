@@ -241,3 +241,48 @@ def test_insert_cards_sets_due_now_and_links_concept(session):
     session.flush()
     card = session.query(SrsCard).filter_by(user_id=user.id).one()
     assert n == 1 and card.due_at == now and card.concept_id == cid
+
+
+# ---- LWW прогресса повторений (FR-SYNC-08) ----
+
+
+def _card(cid, reps, updated_at=None):
+    body = {
+        "id": str(cid),
+        "module": "languages",
+        "front": {"word": "x"},
+        "back": {"definition": "y"},
+        "source": "awl",
+        "fsrsState": {"reps": reps},
+        "dueAt": NOW,
+    }
+    if updated_at:
+        body["updatedAt"] = updated_at
+    return body
+
+
+def test_newer_card_version_wins(client, session):
+    user = make_user(session)
+    cid = uuid.uuid4()
+    c = client(user)
+    c.post("/sync/push", json={"srsCards": [_card(cid, 1, "2026-09-30T10:00:00+00:00")]})
+    c.post("/sync/push", json={"srsCards": [_card(cid, 2, "2026-09-30T11:00:00+00:00")]})
+    assert session.get(SrsCard, cid).fsrs_state["reps"] == 2
+
+
+def test_older_card_version_is_ignored_but_acked(client, session):
+    user = make_user(session)
+    cid = uuid.uuid4()
+    c = client(user)
+    c.post("/sync/push", json={"srsCards": [_card(cid, 5, "2026-09-30T11:00:00+00:00")]})
+    r = c.post("/sync/push", json={"srsCards": [_card(cid, 1, "2026-09-30T09:00:00+00:00")]})
+    assert str(cid) in r.json()["ackIds"]  # клиенту повторять нечего
+    assert session.get(SrsCard, cid).fsrs_state["reps"] == 5
+
+
+def test_pull_returns_card_updated_at(client, session):
+    user = make_user(session)
+    cid = uuid.uuid4()
+    client(user).post("/sync/push", json={"srsCards": [_card(cid, 1, "2026-09-30T10:00:00+00:00")]})
+    [card] = client(user).get("/sync/pull").json()["srsCards"]
+    assert card["updatedAt"].startswith("2026-09-30T10:00:00")
