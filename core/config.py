@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 30  # 30 дней (MVP «для себя»)
 
+    # Повтор AI-задач при временных сбоях: сколько попыток и базовая отсрочка
+    # (растёт вдвое с каждой неудачей).
+    job_max_attempts: int = 3
+    job_retry_backoff_seconds: int = 60
+
     # Админка (sqladmin): секрет cookie-сессии. Пусто → берётся jwt_secret.
     admin_session_secret: str = ""
 

@@ -128,6 +128,8 @@ class Job(Base):
     input_ref: Mapped[dict] = mapped_column(JSONB, nullable=False)
     result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # Не раньше этого момента задачу пробуют снова (после временного сбоя).
+    retry_after: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 

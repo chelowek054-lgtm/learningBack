@@ -10,7 +10,7 @@ from fastapi import APIRouter
 
 from core.ai_gateway import get_ai_gateway
 from core.deps import CurrentUser, SessionDep
-from core.jobs import process_job
+from core.jobs import due_jobs, process_job
 from core.models import Activity, Job, Response, SrsCard
 from core.schemas import (
     ActivityIO,
@@ -105,8 +105,7 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
 
     # Обрабатываем pending-jobs пользователя (MVP: синхронно).
     gateway = get_ai_gateway()
-    pending = session.query(Job).filter(Job.user_id == user.id, Job.status == "pending").all()
-    for job in pending:
+    for job in due_jobs(session, user.id):
         process_job(session, job, gateway)
 
     session.commit()
@@ -117,7 +116,9 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
 def pull(user: CurrentUser, session: SessionDep) -> SyncPullOut:
     activities = session.query(Activity).filter(Activity.user_id == user.id).all()
     responses = session.query(Response).filter(Response.user_id == user.id).all()
-    jobs = session.query(Job).filter(Job.user_id == user.id, Job.status == "done").all()
+    jobs = (
+        session.query(Job).filter(Job.user_id == user.id, Job.status.in_(("done", "failed"))).all()
+    )
     cards = session.query(SrsCard).filter(SrsCard.user_id == user.id).all()
 
     return SyncPullOut(
