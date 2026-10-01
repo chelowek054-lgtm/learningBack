@@ -14,7 +14,7 @@ from modules.knowledge.assessment_store import get_or_generate
 from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.course import course_view, generate_course, mark_completed
-from modules.knowledge.cow import effective_graph
+from modules.knowledge.cow import effective_graph, resolve_node
 from modules.knowledge.study import start_step, submit_answer, weak_nodes
 from modules.knowledge.placement import (
     NoProbeAvailable,
@@ -50,6 +50,27 @@ def get_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
     return effective_graph(session, user.id, domain)
 
 
+@router.get("/nodes/{node_id}")
+def get_node(node_id: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Полный узел с теорией: канонический (с оверрайдом пользователя) или свой."""
+    try:
+        node_uuid = uuid.UUID(node_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "узел не найден") from None
+    c = session.get(Concept, node_uuid)
+    if c is not None:
+        uc = (
+            session.query(UserConcept)
+            .filter_by(user_id=user.id, base_concept_id=c.id)
+            .first()
+        )
+        return resolve_node(c, uc)
+    uc = session.get(UserConcept, node_uuid)
+    if uc is None or uc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "узел не найден")
+    return resolve_node(None, uc)
+
+
 # ---- канон-курирование: ТОЛЬКО администратор ----
 # Канон общий для всех пользователей, поэтому правит его только is_superuser.
 # Обычный пользователь работает со своим слоем (COW) — секция ниже.
@@ -74,7 +95,21 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
     draft = build_graph(body.domain, body.topic, body.max_nodes)
     key_to_id: dict[str, object] = {}
     for n in draft.get("nodes", []):
-        existing = session.query(Concept).filter_by(domain=body.domain, title=n["title"]).first()
+        key = n.get("key") or None
+        # Узел ищем по устойчивому ключу, а не по заголовку: модель при
+        # перегенерации может переименовать узел, и поиск по заголовку заводил дубль.
+        # Заголовок — запасной путь для узлов, построенных до появления ключа.
+        existing = None
+        if key:
+            existing = session.query(Concept).filter_by(domain=body.domain, key=key).first()
+        if existing is None:
+            existing = (
+                session.query(Concept)
+                .filter_by(domain=body.domain, title=n["title"], key=None)
+                .first()
+            )
+            if existing is not None and key:
+                existing.key = key
         if existing:
             key_to_id[n["key"]] = existing.id
             # Узел уже есть, но без пригодной теории — дополняем, если черновик лучше.
@@ -91,6 +126,7 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
         c = Concept(
             domain=body.domain,
             title=n["title"],
+            key=key,
             tier=n.get("tier", "derived"),
             content=coerce_content(n.get("content")),
             bloom_levels=n.get("bloomLevels", []),

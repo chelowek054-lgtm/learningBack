@@ -25,6 +25,9 @@ class Concept(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     domain: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
+    # Устойчивый ключ узла внутри домена: по нему build/refresh находят узел,
+    # даже если модель переименовала заголовок. Null — узел ещё не пересобирался.
+    key: Mapped[str | None] = mapped_column(String, nullable=True)
     tier: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'derived'")
     )  # core|derived
@@ -40,7 +43,16 @@ class Concept(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'draft'"))
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
-    __table_args__ = (Index("idx_concept_domain_tier", "domain", "tier"),)
+    __table_args__ = (
+        Index("idx_concept_domain_tier", "domain", "tier"),
+        Index(
+            "uq_concept_domain_key",
+            "domain",
+            "key",
+            unique=True,
+            postgresql_where=text("key IS NOT NULL"),
+        ),
+    )
 
 
 class ConceptEdge(Base):

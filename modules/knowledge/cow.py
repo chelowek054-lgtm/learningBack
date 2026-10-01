@@ -12,14 +12,35 @@ from modules.knowledge.content import ensure_shape
 from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
 
 
-def resolve_node(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
+def _lighten(node: dict[str, Any], light: bool) -> dict[str, Any]:
+    """Облегчённый узел: вместо полной теории — только краткое пояснение.
+
+    Теория растёт вместе с графом, а список нужен для карты и связей; полный
+    узел отдаёт `GET /graph/nodes/{id}`. Флаг `light` говорит клиенту, что
+    `content` неполон и сохранять его целиком нельзя.
+    """
+    if light:
+        summary = node["content"].get("summary", "")
+        node["content"] = {"summary": summary}
+    node["light"] = light
+    return node
+
+
+def resolve_node(
+    c: Concept | None, uc: UserConcept | None, light: bool = False
+) -> dict[str, Any]:
     """Эффективный узел: канон + персональный оверрайд, либо свой персональный узел."""
+    return _lighten(_resolve(c, uc), light)
+
+
+def _resolve(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
     if c is not None:
         content = uc.content_override if (uc and uc.content_override is not None) else c.content
         return {
             "id": str(c.id),
             "kind": "canonical",
             "userConceptId": str(uc.id) if uc else None,
+            "key": c.key,
             "title": c.title,
             "tier": c.tier,
             "centrality": c.centrality,
@@ -53,8 +74,13 @@ def resolve_node(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
     }
 
 
-def effective_graph(session: Session, user_id: uuid.UUID, domain: str) -> dict[str, Any]:
-    """Полный граф пользователя в домене: наследованный канон + персональные правки/ветки."""
+def effective_graph(
+    session: Session, user_id: uuid.UUID, domain: str, light: bool = True
+) -> dict[str, Any]:
+    """Граф пользователя в домене: наследованный канон + персональные правки/ветки.
+
+    По умолчанию облегчённый — без полной теории узлов (см. `_lighten`).
+    """
     concepts = session.query(Concept).filter(Concept.domain == domain).all()
     concept_ids = {c.id for c in concepts}
 
@@ -68,8 +94,8 @@ def effective_graph(session: Session, user_id: uuid.UUID, domain: str) -> dict[s
     by_base = {uc.base_concept_id: uc for uc in ucs if uc.base_concept_id is not None}
     own = [uc for uc in ucs if uc.base_concept_id is None]
 
-    nodes = [resolve_node(c, by_base.get(c.id)) for c in concepts]
-    nodes += [resolve_node(None, uc) for uc in own]
+    nodes = [resolve_node(c, by_base.get(c.id), light) for c in concepts]
+    nodes += [resolve_node(None, uc, light) for uc in own]
 
     edges: list[dict[str, Any]] = []
     canon_edges = (
