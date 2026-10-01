@@ -15,7 +15,24 @@ from core.app import app
 from core.config import settings
 from core.db import get_session
 from core.models import PasswordResetCode, SrsCard, User
+from core.ratelimit import reset_request_limiter
+from core.security import hash_reset_code
 from tests.conftest import make_user
+
+
+@pytest.fixture(autouse=True)
+def issued_codes(monkeypatch):
+    """Код хранится хешем, поэтому тест подставляет известные коды и берёт их отсюда."""
+    reset_request_limiter.reset()
+    issued: list[str] = []
+
+    def fake() -> str:
+        issued.append(f"{10000000 + len(issued) + 1}")
+        return issued[-1]
+
+    monkeypatch.setattr("core.routers.auth.generate_reset_code", fake)
+    yield issued
+    reset_request_limiter.reset()
 
 
 @pytest.fixture
@@ -130,13 +147,15 @@ def test_reset_request_is_uniform_for_unknown_email(anon):
     assert known.json() == unknown.json()
 
 
-def test_reset_full_flow_changes_password_and_burns_code(anon, session):
+def test_reset_full_flow_changes_password_and_burns_code(anon, session, issued_codes):
     _register(anon)
     anon.post("/auth/password-reset/request", json={"email": "a@example.com"})
     code = _latest_code(session, "a@example.com")
-    assert len(code.code) == 8 and code.code.isdigit()
+    # В БД лежит хеш, а не сам код (T-0003).
+    assert code.code_hash == hash_reset_code(issued_codes[0])
+    assert issued_codes[0] not in code.code_hash
 
-    confirm = {"email": "a@example.com", "code": code.code, "new_password": "brandnew1"}
+    confirm = {"email": "a@example.com", "code": issued_codes[0], "new_password": "brandnew1"}
     assert anon.post("/auth/password-reset/confirm", json=confirm).status_code == 204
 
     assert (
@@ -153,39 +172,87 @@ def test_reset_full_flow_changes_password_and_burns_code(anon, session):
     assert anon.post("/auth/password-reset/confirm", json=confirm).status_code == 400
 
 
-def test_reset_wrong_code_counts_attempts_then_locks(anon, session):
+def test_reset_wrong_code_counts_attempts_then_locks(anon, session, issued_codes):
     _register(anon)
     anon.post("/auth/password-reset/request", json={"email": "a@example.com"})
-    code = _latest_code(session, "a@example.com")
-    wrong = "00000000" if code.code != "00000000" else "11111111"
-    bad = {"email": "a@example.com", "code": wrong, "new_password": "brandnew1"}
+    bad = {"email": "a@example.com", "code": "00000000", "new_password": "brandnew1"}
 
     for _ in range(settings.password_reset_max_attempts):
         assert anon.post("/auth/password-reset/confirm", json=bad).status_code == 400
     # Лимит исчерпан: даже верный код больше не принимается.
-    good = {"email": "a@example.com", "code": code.code, "new_password": "brandnew1"}
+    good = {"email": "a@example.com", "code": issued_codes[0], "new_password": "brandnew1"}
     assert anon.post("/auth/password-reset/confirm", json=good).status_code == 429
 
 
-def test_reset_expired_code_is_rejected(anon, session):
+def test_reset_expired_code_is_rejected(anon, session, issued_codes):
     _register(anon)
     anon.post("/auth/password-reset/request", json={"email": "a@example.com"})
     code = _latest_code(session, "a@example.com")
     code.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
     session.flush()
-    body = {"email": "a@example.com", "code": code.code, "new_password": "brandnew1"}
+    body = {"email": "a@example.com", "code": issued_codes[0], "new_password": "brandnew1"}
     assert anon.post("/auth/password-reset/confirm", json=body).status_code == 400
 
 
-def test_new_reset_request_invalidates_previous_code(anon, session):
+def test_new_reset_request_invalidates_previous_code(anon, issued_codes):
     _register(anon)
     anon.post("/auth/password-reset/request", json={"email": "a@example.com"})
-    first = _latest_code(session, "a@example.com").code
     anon.post("/auth/password-reset/request", json={"email": "a@example.com"})
-    second = _latest_code(session, "a@example.com").code
-    if first != second:
-        body = {"email": "a@example.com", "code": first, "new_password": "brandnew1"}
-        assert anon.post("/auth/password-reset/confirm", json=body).status_code == 400
+    first, second = issued_codes
+    body = {"email": "a@example.com", "code": first, "new_password": "brandnew1"}
+    assert anon.post("/auth/password-reset/confirm", json=body).status_code == 400
+    body["code"] = second
+    assert anon.post("/auth/password-reset/confirm", json=body).status_code == 204
+
+
+def test_password_change_revokes_old_tokens(anon, issued_codes):
+    """T-0003: старый токен → 401 после смены пароля; новый вход работает."""
+    old = _register(anon).json()["access_token"]
+    assert anon.get("/auth/me", headers=_auth(old)).status_code == 200
+
+    anon.post("/auth/password-reset/request", json={"email": "a@example.com"})
+    body = {"email": "a@example.com", "code": issued_codes[0], "new_password": "brandnew1"}
+    assert anon.post("/auth/password-reset/confirm", json=body).status_code == 204
+
+    assert anon.get("/auth/me", headers=_auth(old)).status_code == 401
+    new = anon.post("/auth/login", json={"email": "a@example.com", "password": "brandnew1"})
+    assert anon.get("/auth/me", headers=_auth(new.json()["access_token"])).status_code == 200
+
+
+def test_token_without_version_claim_is_still_valid_until_password_change(anon, session):
+    """Токены, выпущенные до появления версии, остаются годными (версия 0)."""
+    import jwt
+
+    _register(anon)
+    user = session.query(User).filter_by(email="a@example.com").one()
+    legacy = jwt.encode(
+        {"sub": str(user.id), "exp": 4102444800}, settings.jwt_secret, algorithm="HS256"
+    )
+    assert anon.get("/auth/me", headers=_auth(legacy)).status_code == 200
+
+
+def test_reset_request_is_rate_limited_per_email(anon):
+    _register(anon)
+    body = {"email": "a@example.com"}
+    for _ in range(settings.password_reset_request_limit):
+        assert anon.post("/auth/password-reset/request", json=body).status_code == 202
+    assert anon.post("/auth/password-reset/request", json=body).status_code == 429
+
+
+def test_reset_rate_limit_does_not_reveal_unknown_email(anon):
+    """Для несуществующего адреса лимит срабатывает так же, как для настоящего."""
+    body = {"email": "ghost@example.com"}
+    for _ in range(settings.password_reset_request_limit):
+        assert anon.post("/auth/password-reset/request", json=body).status_code == 202
+    assert anon.post("/auth/password-reset/request", json=body).status_code == 429
+
+
+def test_reset_rate_limit_per_ip_across_emails(anon):
+    for n in range(settings.password_reset_request_limit):
+        r = anon.post("/auth/password-reset/request", json={"email": f"u{n}@example.com"})
+        assert r.status_code == 202
+    r = anon.post("/auth/password-reset/request", json={"email": "other@example.com"})
+    assert r.status_code == 429
 
 
 def test_reset_code_must_be_eight_digits(anon):

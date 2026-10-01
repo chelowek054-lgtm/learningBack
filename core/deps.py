@@ -19,12 +19,15 @@ def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
     session: SessionDep,
 ) -> User:
-    user_id = decode_access_token(credentials.credentials)
-    if user_id is None:
+    decoded = decode_access_token(credentials.credentials)
+    if decoded is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Невалидный или просроченный токен")
+    user_id, token_version = decoded
     user = session.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Пользователь не найден")
+    if token_version != user.token_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Сессия завершена, войдите заново")
     return user
 
 

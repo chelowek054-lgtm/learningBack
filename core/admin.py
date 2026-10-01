@@ -75,7 +75,7 @@ class UserAdmin(ModelView, model=User):
     column_sortable_list = [User.created_at, User.email]
     column_filters = [BooleanFilter(User.is_superuser, title="Администратор")]
     # Хеш пароля не редактируем руками: пароль меняется через auth-эндпоинты.
-    form_excluded_columns = [User.password_hash]
+    form_excluded_columns = [User.password_hash, User.token_version]
 
 
 class PasswordResetCodeAdmin(ModelView, model=PasswordResetCode):
@@ -85,7 +85,7 @@ class PasswordResetCodeAdmin(ModelView, model=PasswordResetCode):
     category = "Ядро"
     column_list = [
         PasswordResetCode.user_id,
-        PasswordResetCode.code,
+        PasswordResetCode.code_hash,
         PasswordResetCode.expires_at,
         PasswordResetCode.used_at,
         PasswordResetCode.attempts,
