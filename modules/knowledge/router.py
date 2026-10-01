@@ -16,6 +16,7 @@ from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph, resolve_node
 from modules.knowledge.study import review_card_ids, start_step, submit_answer, weak_nodes
+from modules.knowledge.promotion import NotPromotable, candidates, promote
 from modules.knowledge.placement import (
     NoProbeAvailable,
     next_probe,
@@ -36,6 +37,7 @@ from modules.knowledge.schemas import (
     OverrideIn,
     OwnNodeIn,
     PlacementAnswerIn,
+    PromoteIn,
     RecomputeIn,
     UserEdgeIn,
     UserNodePatch,
@@ -199,6 +201,27 @@ def create_canon_edge(body: CanonEdgeIn, _: CurrentSuperuser, session: SessionDe
 def recompute(body: RecomputeIn, _: CurrentSuperuser, session: SessionDep) -> list[dict]:
     """Пересчёт centrality + предложение узлов в ядро (гибрид метрика/курирование)."""
     return recompute_centrality(session, body.domain)
+
+
+@router.get("/canon/promotion-candidates")
+def promotion_candidates(
+    domain: str, _: CurrentSuperuser, session: SessionDep, min_users: int = Query(1, ge=1)
+) -> list[dict]:
+    """Что пользователи делают с графом сами: кандидаты на включение в канон."""
+    return candidates(session, domain, min_users)
+
+
+@router.post("/canon/promote")
+def promote_node(body: PromoteIn, _: CurrentSuperuser, session: SessionDep) -> dict:
+    """Промоция: личный узел или правка → канон; у автора снимается оверрайд."""
+    try:
+        result = promote(session, body.user_concept_id, body.tier)
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    except NotPromotable as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+    session.commit()
+    return result
 
 
 @router.post("/canon/nodes/{concept_id}/approve")
