@@ -86,7 +86,7 @@ def candidates(session: Session, domain: str, min_users: int = 1) -> list[dict[s
                 }
             )
 
-    out.sort(key=lambda c: (-c["users"], c["title"]))
+    out.sort(key=lambda c: (-c["users"], c["title"].lower(), c["kind"]))
     return out
 
 
