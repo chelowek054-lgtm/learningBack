@@ -35,6 +35,8 @@ class User(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     email: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Версия сессий: смена пароля увеличивает её, и прежние токены перестают действовать.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Доступ в админку и курирование канона. Выдаётся только через scripts/createsuperuser.
     is_superuser: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
@@ -46,15 +48,15 @@ class User(Base):
 class PasswordResetCode(Base):
     """Временный код восстановления пароля, привязанный к пользователю.
 
-    Код хранится в открытом виде: доставки (почта/SMS) ещё нет, и читать его
-    предполагается из БД через pgAdmin. При появлении доставки — хешировать.
+    В БД лежит только HMAC-хеш кода (`code_hash`): утечка таблицы не даёт
+    действующих кодов. Сам код существует лишь в момент выпуска.
     """
 
     __tablename__ = "password_reset_code"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
-    code: Mapped[str] = mapped_column(String(8), nullable=False)  # 8 цифр, ведущие нули значимы
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(_ts, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))

@@ -80,6 +80,10 @@ def start_step(
     created: list[Activity] = []
     for planned in step["activities"]:
         activity_type = planned["type"]
+        if activity_type == "srs":
+            # Повторение — не Activity, а очередь карточек (A-0016): шаг лишь
+            # указывает карточку узла, см. review_card_ids.
+            continue
         if activity_type in existing:
             created.append(existing[activity_type])
             continue
@@ -101,6 +105,33 @@ def start_step(
     return created
 
 
+def review_card_ids(
+    session: Session, user_id: uuid.UUID, course: Course, concept_id: str
+) -> list[str]:
+    """Карточки, на повторение которых ведёт шаг курса (A-0016, AC-11.9).
+
+    Плановая запись `srs` указывает узел: свой или, для вкрапленного
+    повторения, ранее пройденный. Карточка заводится, если её ещё нет.
+    """
+    step = _step_of(course, concept_id)
+    if step is None:
+        raise LookupError("шаг не найден в текущем курсе")
+    ids: list[str] = []
+    for planned in step["activities"]:
+        if planned["type"] != "srs":
+            continue
+        node_id = planned.get("conceptId") or concept_id
+        concept = session.get(Concept, node_id)
+        if concept is None:
+            continue
+        content = NodeContent.model_validate(coerce_content(concept.content))
+        card = _ensure_card(session, user_id, concept, content, source="generated")
+        session.flush()
+        if str(card.id) not in ids:
+            ids.append(str(card.id))
+    return ids
+
+
 def _payload(
     session: Session,
     concept: Concept,
@@ -119,8 +150,6 @@ def _payload(
     }
     if activity_type == "concept_study":
         return {**base, "content": content.model_dump()}
-    if activity_type == "srs":
-        return {**base, "prompt": f"Вспомните: {concept.title}"}
 
     kind = _ACTIVITY_KIND.get(activity_type)
     if kind is None:

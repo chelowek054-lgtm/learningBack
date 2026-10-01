@@ -13,15 +13,41 @@ kind)`: версия узла входит в ключ, так что **прав
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
+from modules.knowledge.content import ensure_shape
 from modules.knowledge.assessment import (
     AssessmentPayload,
     generate_assessment,
     validate_request,
 )
-from modules.knowledge.models import Assessment, Concept
+from modules.knowledge.models import Assessment, UserConcept
+
+
+class Assessable(Protocol):
+    """Всё, по чему можно генерировать задания: канон-узел или адаптер личного."""
+
+    id: uuid.UUID
+    version: int
+    title: str
+    content: Any
+
+
+@dataclass(frozen=True)
+class PersonalNodeRef:
+    """Личный узел в виде, пригодном для генерации заданий (теория лежит в оверрайде)."""
+
+    id: uuid.UUID
+    version: int
+    title: str
+    content: dict[str, Any]
+
+    @classmethod
+    def of(cls, uc: UserConcept) -> "PersonalNodeRef":
+        return cls(uc.id, uc.version, uc.title or "", ensure_shape(uc.content_override))
 
 
 def find_cached(
@@ -39,7 +65,7 @@ def find_cached(
     )
 
 
-def purge_stale(session: Session, concept: Concept) -> int:
+def purge_stale(session: Session, concept: Assessable) -> int:
     """Удалить задания, сгенерированные по прежним версиям узла."""
     stale = (
         session.query(Assessment)
@@ -55,7 +81,7 @@ def purge_stale(session: Session, concept: Concept) -> int:
 
 
 def get_or_generate(
-    session: Session, concept: Concept, bloom: str, kind: str, *, force: bool = False
+    session: Session, concept: Assessable, bloom: str, kind: str, *, force: bool = False
 ) -> tuple[AssessmentPayload, bool]:
     """Задания по узлу. Возвращает (payload, cached).
 

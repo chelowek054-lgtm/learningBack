@@ -101,7 +101,8 @@ class UserContextMiddleware:
         user_id = None
         for name, value in scope.get("headers", []):
             if name == b"authorization" and value[:7].lower() == b"bearer ":
-                sub = decode_access_token(value[7:].decode("latin-1"))
+                decoded = decode_access_token(value[7:].decode("latin-1"))
+                sub = decoded[0] if decoded else None
                 try:
                     user_id = uuid.UUID(sub) if sub else None
                 except ValueError:

@@ -1,9 +1,10 @@
 """Аутентификация — собственный JWT (WS1)."""
 
+import logging
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from core.config import settings
 from core.deps import CurrentUser, SessionDep
@@ -18,15 +19,18 @@ from core.schemas import (
     UserOut,
 )
 from core.modules import provision_subject
+from core.ratelimit import reset_request_limiter
 from core.security import (
     create_access_token,
     generate_reset_code,
     hash_password,
+    hash_reset_code,
     reset_code_expires_at,
     verify_password,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+log = logging.getLogger(__name__)
 
 
 @router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
@@ -38,7 +42,7 @@ def register(body: RegisterIn, session: SessionDep) -> TokenOut:
     session.add(user)
     session.commit()
     session.refresh(user)
-    return TokenOut(access_token=create_access_token(str(user.id)))
+    return TokenOut(access_token=create_access_token(str(user.id), user.token_version))
 
 
 @router.post("/login", response_model=TokenOut)
@@ -50,17 +54,27 @@ def login(body: LoginIn, session: SessionDep) -> TokenOut:
         or not verify_password(body.password, user.password_hash)
     ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный email или пароль")
-    return TokenOut(access_token=create_access_token(str(user.id)))
+    return TokenOut(access_token=create_access_token(str(user.id), user.token_version))
 
 
 @router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
-def password_reset_request(body: PasswordResetRequestIn, session: SessionDep) -> dict:
+def password_reset_request(
+    body: PasswordResetRequestIn, session: SessionDep, request: Request
+) -> dict:
     """Выпустить временный код восстановления.
 
-    Доставки (почта/SMS) ещё нет — код кладётся в `password_reset_code` и читается
-    из БД (pgAdmin). Ответ одинаков независимо от существования email, чтобы не
-    давать перебирать зарегистрированные адреса.
+    В БД остаётся только хеш кода. Доставки (почта/SMS) ещё нет, поэтому вне
+    production код пишется в лог сервера — иначе его негде взять. Ответ одинаков
+    независимо от существования email, чтобы не давать перебирать адреса; лимит
+    частоты считается по email и IP до обращения к БД, по той же причине.
     """
+    window = settings.password_reset_request_window_seconds
+    ip = request.client.host if request.client else "unknown"
+    for key in (f"email:{str(body.email).lower()}", f"ip:{ip}"):
+        if not reset_request_limiter.allow(key, settings.password_reset_request_limit, window):
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много запросов кода, попробуйте позже"
+            )
     now = datetime.now(timezone.utc)
     user = session.query(User).filter(User.email == body.email).first()
     if user is not None:
@@ -69,14 +83,17 @@ def password_reset_request(body: PasswordResetRequestIn, session: SessionDep) ->
             PasswordResetCode.user_id == user.id,
             PasswordResetCode.used_at.is_(None),
         ).update({PasswordResetCode.used_at: now}, synchronize_session=False)
+        code = generate_reset_code()
         session.add(
             PasswordResetCode(
                 user_id=user.id,
-                code=generate_reset_code(),
+                code_hash=hash_reset_code(code),
                 expires_at=reset_code_expires_at(now),
             )
         )
         session.commit()
+        if settings.app_env not in ("staging", "production"):
+            log.warning("Код восстановления для %s: %s (доставки пока нет)", user.email, code)
     return {"status": "accepted", "ttl_minutes": settings.password_reset_code_ttl_minutes}
 
 
@@ -102,12 +119,14 @@ def password_reset_confirm(body: PasswordResetConfirmIn, session: SessionDep) ->
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, запросите новый код"
         )
-    if not secrets.compare_digest(entry.code, body.code):
+    if not secrets.compare_digest(entry.code_hash, hash_reset_code(body.code)):
         entry.attempts += 1
         session.commit()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код недействителен или просрочен")
 
     user.password_hash = hash_password(body.new_password)
+    # Все выданные ранее токены перестают действовать.
+    user.token_version += 1
     entry.used_at = now
     session.commit()
 

@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     # Доставки (почта/SMS) пока нет — код читается из БД (pgAdmin). См. ROADMAP.
     password_reset_code_ttl_minutes: int = 15
     password_reset_max_attempts: int = 5
+    # Запросы кода: не больше N на email и на IP за окно (защита от заспамливания
+    # почты и от перебора адресов). Ответ при превышении — 429.
+    password_reset_request_limit: int = 5
+    password_reset_request_window_seconds: int = 900
 
 
 settings = Settings()

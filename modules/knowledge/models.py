@@ -25,6 +25,9 @@ class Concept(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     domain: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
+    # Устойчивый ключ узла внутри домена: по нему build/refresh находят узел,
+    # даже если модель переименовала заголовок. Null — узел ещё не пересобирался.
+    key: Mapped[str | None] = mapped_column(String, nullable=True)
     tier: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'derived'")
     )  # core|derived
@@ -40,7 +43,16 @@ class Concept(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'draft'"))
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
-    __table_args__ = (Index("idx_concept_domain_tier", "domain", "tier"),)
+    __table_args__ = (
+        Index("idx_concept_domain_tier", "domain", "tier"),
+        Index(
+            "uq_concept_domain_key",
+            "domain",
+            "key",
+            unique=True,
+            postgresql_where=text("key IS NOT NULL"),
+        ),
+    )
 
 
 class ConceptEdge(Base):
@@ -71,6 +83,8 @@ class UserConcept(Base):
     )
     title: Mapped[str | None] = mapped_column(String, nullable=True)  # для своих узлов
     content_override: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Растёт с каждой правкой заголовка/теории: на версии держится кэш заданий.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     mastery: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'locked'"))
     origin: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'inherited'"))

@@ -10,12 +10,12 @@ from core.models import Activity
 from modules.knowledge.ai import build_graph, expand_node
 from modules.knowledge.answer import score_answer
 from modules.knowledge.assessment import NotGroundable
-from modules.knowledge.assessment_store import get_or_generate
+from modules.knowledge.assessment_store import PersonalNodeRef, get_or_generate
 from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.course import course_view, generate_course, mark_completed
-from modules.knowledge.cow import effective_graph
-from modules.knowledge.study import start_step, submit_answer, weak_nodes
+from modules.knowledge.cow import effective_graph, resolve_node
+from modules.knowledge.study import review_card_ids, start_step, submit_answer, weak_nodes
 from modules.knowledge.placement import (
     NoProbeAvailable,
     next_probe,
@@ -50,6 +50,23 @@ def get_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
     return effective_graph(session, user.id, domain)
 
 
+@router.get("/nodes/{node_id}")
+def get_node(node_id: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Полный узел с теорией: канонический (с оверрайдом пользователя) или свой."""
+    try:
+        node_uuid = uuid.UUID(node_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "узел не найден") from None
+    c = session.get(Concept, node_uuid)
+    if c is not None:
+        uc = session.query(UserConcept).filter_by(user_id=user.id, base_concept_id=c.id).first()
+        return resolve_node(c, uc)
+    uc = session.get(UserConcept, node_uuid)
+    if uc is None or uc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "узел не найден")
+    return resolve_node(None, uc)
+
+
 # ---- канон-курирование: ТОЛЬКО администратор ----
 # Канон общий для всех пользователей, поэтому правит его только is_superuser.
 # Обычный пользователь работает со своим слоем (COW) — секция ниже.
@@ -74,7 +91,21 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
     draft = build_graph(body.domain, body.topic, body.max_nodes)
     key_to_id: dict[str, object] = {}
     for n in draft.get("nodes", []):
-        existing = session.query(Concept).filter_by(domain=body.domain, title=n["title"]).first()
+        key = n.get("key") or None
+        # Узел ищем по устойчивому ключу, а не по заголовку: модель при
+        # перегенерации может переименовать узел, и поиск по заголовку заводил дубль.
+        # Заголовок — запасной путь для узлов, построенных до появления ключа.
+        existing = None
+        if key:
+            existing = session.query(Concept).filter_by(domain=body.domain, key=key).first()
+        if existing is None:
+            existing = (
+                session.query(Concept)
+                .filter_by(domain=body.domain, title=n["title"], key=None)
+                .first()
+            )
+            if existing is not None and key:
+                existing.key = key
         if existing:
             key_to_id[n["key"]] = existing.id
             # Узел уже есть, но без пригодной теории — дополняем, если черновик лучше.
@@ -91,6 +122,7 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
         c = Concept(
             domain=body.domain,
             title=n["title"],
+            key=key,
             tier=n.get("tier", "derived"),
             content=coerce_content(n.get("content")),
             bloom_levels=n.get("bloomLevels", []),
@@ -185,6 +217,21 @@ def approve_node(
 
 
 # ---- задания по теории узла (KG3) ----
+def _assessable(session, user, node_id: str):
+    """Канон-узел по id либо личный узел текущего пользователя."""
+    try:
+        node_uuid = uuid.UUID(node_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден") from None
+    concept = session.get(Concept, node_uuid)
+    if concept is not None:
+        return concept
+    uc = session.get(UserConcept, node_uuid)
+    if uc is None or uc.user_id != user.id or uc.base_concept_id is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
+    return PersonalNodeRef.of(uc)
+
+
 @router.get("/nodes/{concept_id}/assessment")
 def node_assessment(
     concept_id: str,
@@ -196,12 +243,10 @@ def node_assessment(
     """Задания по узлу — из кэша, иначе генерируются и кэшируются.
 
     Ключ кэша включает версию узла, поэтому правка теории сама обесценивает
-    прежние задания. Персональные узлы пока не поддержаны: у них нет версии,
-    а без неё кэш не обесценить.
+    прежние задания. Для личного узла (свой, не оверрайд канона) то же самое:
+    версия растёт при правке `PUT /graph/user-nodes/{id}`.
     """
-    concept = session.get(Concept, concept_id)
-    if concept is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
+    concept = _assessable(session, user, concept_id)
     try:
         payload, cached = get_or_generate(session, concept, bloom, kind)
     except NotGroundable as e:
@@ -346,9 +391,11 @@ def start_course_step(domain: str, concept_id: str, user: CurrentUser, session: 
         activities = start_step(session, user.id, course, concept_id)
     except LookupError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    cards = review_card_ids(session, user.id, course, concept_id)
     session.commit()
     return {
         "conceptId": concept_id,
+        "reviewCards": cards,
         "activities": [
             {
                 "id": str(a.id),
@@ -497,6 +544,8 @@ def override_canon_node(
             origin="edited",
         )
         session.add(uc)
+    else:
+        uc.version += 1
     uc.content_override = body.content.model_dump()
     uc.origin = "edited"
     session.commit()
@@ -510,10 +559,14 @@ def patch_user_node(
     uc = session.get(UserConcept, user_concept_id)
     if uc is None or uc.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user_concept не найден")
-    if body.title is not None:
+    if body.title is not None and body.title != uc.title:
         uc.title = body.title
+        uc.version += 1
     if body.content is not None:
-        uc.content_override = body.content.model_dump()
+        new_content = body.content.model_dump()
+        if new_content != uc.content_override:
+            uc.content_override = new_content
+            uc.version += 1
     if body.mastery is not None:
         uc.mastery = body.mastery
     if body.status is not None:

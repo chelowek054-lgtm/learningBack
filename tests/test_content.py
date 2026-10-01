@@ -100,21 +100,20 @@ def test_api_stores_normalized_content(session, client):
 
 def test_reading_a_node_returns_the_full_shape(session, client):
     """Даже если в БД лежит укороченный контент (создан до KG3-01)."""
-    session.add(
-        Concept(
-            domain="ml",
-            title="Старый",
-            tier="derived",
-            content={"summary": "только summary"},
-            bloom_levels=[],
-            difficulty=1,
-            source="llm",
-            status="draft",
-        )
+    old = Concept(
+        domain="ml",
+        title="Старый",
+        tier="derived",
+        content={"summary": "только summary"},
+        bloom_levels=[],
+        difficulty=1,
+        source="llm",
+        status="draft",
     )
+    session.add(old)
     session.flush()
 
-    node = client(make_user(session)).get("/graph/ml").json()["nodes"][0]
+    node = client(make_user(session)).get(f"/graph/nodes/{old.id}").json()
 
     assert set(node["content"]) == {"summary", "sections", "references"}
 
