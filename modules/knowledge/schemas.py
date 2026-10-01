@@ -50,6 +50,11 @@ class OwnNodeIn(BaseModel):
     content: NodeContent = Field(default_factory=NodeContent)
 
 
+class PromoteIn(BaseModel):
+    user_concept_id: uuid.UUID
+    tier: str = "derived"
+
+
 class OverrideIn(BaseModel):
     content: NodeContent
 
