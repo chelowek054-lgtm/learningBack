@@ -44,6 +44,14 @@ class BackendModule:
     ) -> None:
         """Стартовый контент под выбранный предмет. Идемпотентно."""
 
+    def apply_activity(self, domain: str) -> str | None:
+        """Тип Activity для практики узла в этой области; None — обычное применение.
+
+        Курс не знает предметов (A-0001): технический модуль сам объявляет, что
+        его практика — задача на код, а не вопрос с выбором.
+        """
+        return None
+
     def admin_views(self) -> list[Any]:
         """Представления таблиц модуля для админки."""
         return []
@@ -68,6 +76,15 @@ def load_modules(paths: str | None = None) -> list[BackendModule]:
         loaded.append(backend)
     _modules = loaded
     return loaded
+
+
+def practice_activity_type(domain: str, default: str = "concept_apply") -> str:
+    """Тип практики узла: первый модуль, заявивший область, иначе `default`."""
+    for m in load_modules():
+        declared = m.apply_activity(domain)
+        if declared:
+            return declared
+    return default
 
 
 def grade_job_modules() -> dict[str, str]:

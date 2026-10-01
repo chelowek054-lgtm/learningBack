@@ -295,3 +295,39 @@ def test_start_endpoint_returns_review_cards(session, client):
     body = r.json()
     assert len(body["reviewCards"]) == 1
     assert "srs" not in [a["type"] for a in body["activities"]]
+
+
+# ---- практика технического предмета — задача на код (T-0013) ----
+
+
+def test_technical_domain_step_has_code_task_with_statement(session):
+    user, concept, course = _prepared(session)  # домен "ml"
+
+    activities = start_step(session, user.id, course, str(concept.id))
+
+    code = next(a for a in activities if a.type == "code_task")
+    assert code.payload["statement"]
+    assert code.payload["conceptId"] == str(concept.id)
+    assert code.connectivity == "online"
+    assert "concept_apply" not in [a.type for a in activities]
+
+
+def test_general_domain_step_keeps_concept_apply(session):
+    user = make_user(session)
+    concept = Concept(
+        domain="history",
+        title="Узел",
+        tier="core",
+        content=THEORY,
+        bloom_levels=["remember", "understand", "apply"],
+        difficulty=1,
+        source="curated",
+        status="approved",
+    )
+    session.add(concept)
+    session.flush()
+    course = generate_course(session, user.id, "history", "apply")
+
+    types = [a.type for a in start_step(session, user.id, course, str(concept.id))]
+
+    assert "concept_apply" in types and "code_task" not in types

@@ -23,6 +23,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from core.modules import practice_activity_type
 from modules.knowledge.assessment import BLOOM_LEVELS
 from modules.knowledge.mastery import (
     KNOWN_THRESHOLD,
@@ -57,7 +58,8 @@ def _chain(concept: Concept, bloom: str, *, spiral: bool, has_misconception: boo
         # Заблуждение чинится противопоставлением, а не повторением (§7.1).
         chain.append({"type": "concept_contrast", "bloom": "understand"})
     if target >= BLOOM_LEVELS.index("apply"):
-        chain.append({"type": "concept_apply", "bloom": "apply"})
+        # Тип практики объявляет модуль области: у технических предметов это задача на код.
+        chain.append({"type": practice_activity_type(concept.domain), "bloom": "apply"})
     chain.append({"type": "srs", "bloom": "remember"})
     return chain
 

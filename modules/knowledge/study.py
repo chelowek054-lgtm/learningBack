@@ -42,6 +42,7 @@ _ACTIVITY_KIND = {
     "concept_recall": "test",
     "concept_contrast": "test",
     "concept_apply": "practice",
+    "code_task": "practice",
 }
 
 
@@ -158,7 +159,12 @@ def _payload(
         payload, _cached = get_or_generate(session, concept, bloom, kind)
     except (NotGroundable, ValueError):
         return None
-    return {**base, "item": payload.items[0].model_dump()}
+    item = payload.items[0]
+    if activity_type == "code_task":
+        # Клиент показывает условие и редактор, а не варианты ответа; ревью —
+        # job grade_code по рубрике, а не оценка по эталону.
+        return {**base, "statement": item.prompt, "item": item.model_dump()}
+    return {**base, "item": item.model_dump()}
 
 
 def _ensure_card(
