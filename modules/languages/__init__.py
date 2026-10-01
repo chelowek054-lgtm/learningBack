@@ -18,6 +18,8 @@ MODULE_ID = "languages"
 ACTIVITY_TYPES = [
     "ielts_writing_task2",
     "ielts_writing_task1",
+    "toefl_writing_independent",
+    "toefl_writing_integrated",
     "reading_drill",
     "listening_drill",
     "speaking_response",
@@ -27,6 +29,13 @@ ACTIVITY_TYPES = [
 # Предмет считается языковым, если в названии есть экзамен или английский.
 _LANGUAGE_SUBJECT = re.compile(r"ielts|toefl|english|англ", re.IGNORECASE)
 
+_TOEFL_SUBJECT = re.compile(r"toefl", re.IGNORECASE)
+
+DEMO_TOEFL_PROMPT = (
+    "Do you agree or disagree: universities should require every student to take "
+    "a course in a foreign language? Use specific reasons and examples to support your answer."
+)
+
 DEMO_ESSAY_PROMPT = (
     "Some people believe technology makes life more complex. "
     "To what extent do you agree or disagree?"
@@ -35,6 +44,21 @@ DEMO_ESSAY_PROMPT = (
 
 def is_language_subject(subject: dict[str, Any]) -> bool:
     return bool(_LANGUAGE_SUBJECT.search(f"{subject.get('id', '')} {subject.get('title', '')}"))
+
+
+def is_toefl_subject(subject: dict[str, Any]) -> bool:
+    return bool(_TOEFL_SUBJECT.search(f"{subject.get('id', '')} {subject.get('title', '')}"))
+
+
+def demo_writing(subject: dict[str, Any]) -> tuple[str, str, str]:
+    """(тип Activity, рубрика, текст задания) для пробного письма по предмету.
+
+    Тип выбирается по предмету, который назвал человек: TOEFL → задание TOEFL
+    со своей рубрикой, иначе IELTS Task 2.
+    """
+    if is_toefl_subject(subject):
+        return "toefl_writing_independent", "toefl_writing_independent", DEMO_TOEFL_PROMPT
+    return "ielts_writing_task2", "ielts_writing_task2", DEMO_ESSAY_PROMPT
 
 
 class LanguagesModule(BackendModule):
@@ -52,9 +76,10 @@ class LanguagesModule(BackendModule):
             return
         if session.query(SrsCard).filter_by(user_id=user_id, source="awl").first() is None:
             insert_cards(session, user_id, MODULE_ID, awl_card_partials(), now)
+        activity_type, rubric_id, prompt = demo_writing(subject)
         if (
             session.query(Activity)
-            .filter_by(user_id=user_id, module=MODULE_ID, type="ielts_writing_task2")
+            .filter_by(user_id=user_id, module=MODULE_ID, type=activity_type)
             .first()
             is None
         ):
@@ -62,9 +87,9 @@ class LanguagesModule(BackendModule):
                 Activity(
                     user_id=user_id,
                     module=MODULE_ID,
-                    type="ielts_writing_task2",
+                    type=activity_type,
                     connectivity="online",
-                    payload={"prompt": DEMO_ESSAY_PROMPT},
+                    payload={"prompt": prompt, "rubricId": rubric_id},
                 )
             )
 

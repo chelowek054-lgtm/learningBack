@@ -33,6 +33,10 @@ class MlModule(BackendModule):
     def rubrics(self) -> list[dict[str, Any]]:
         return RUBRICS
 
+    def apply_activity(self, domain: str) -> str | None:
+        """Практика технического предмета — задача на код."""
+        return "code_task" if is_ml_subject({"id": domain, "title": domain}) else None
+
     def grade_jobs(self) -> dict[str, str]:
         return {"grade_concept": MODULE_ID, "grade_code": MODULE_ID}
 

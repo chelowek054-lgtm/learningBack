@@ -28,10 +28,16 @@ THEORY = {
 
 
 def _c(
-    session, title, *, tier="derived", centrality=0.0, blooms=("remember", "understand", "apply")
+    session,
+    title,
+    *,
+    tier="derived",
+    centrality=0.0,
+    blooms=("remember", "understand", "apply"),
+    domain="ml",
 ):
     c = Concept(
-        domain="ml",
+        domain=domain,
         title=title,
         tier=tier,
         centrality=centrality,
@@ -214,12 +220,26 @@ def test_chain_rises_through_the_blooms(session):
 
     activities = build_path(session, user.id, "ml", "apply")[0]["activities"]
 
+    # Домен технический: практика — задача на код (T-0013), его объявляет модуль ml.
+    assert [a["type"] for a in activities][:3] == [
+        "concept_study",
+        "concept_recall",
+        "code_task",
+    ]
+    assert activities[-1]["type"] == "srs", "удержание замыкает цепочку"
+
+
+def test_non_technical_domain_keeps_concept_apply(session):
+    user = make_user(session)
+    _c(session, "A", domain="history")
+
+    activities = build_path(session, user.id, "history", "apply")[0]["activities"]
+
     assert [a["type"] for a in activities][:3] == [
         "concept_study",
         "concept_recall",
         "concept_apply",
     ]
-    assert activities[-1]["type"] == "srs", "удержание замыкает цепочку"
 
 
 def test_apply_is_absent_below_the_apply_goal(session):
@@ -228,7 +248,8 @@ def test_apply_is_absent_below_the_apply_goal(session):
 
     activities = build_path(session, user.id, "ml", "understand")[0]["activities"]
 
-    assert "concept_apply" not in [a["type"] for a in activities]
+    types = [a["type"] for a in activities]
+    assert "concept_apply" not in types and "code_task" not in types
 
 
 def test_misconception_adds_a_contrast_activity(session):
