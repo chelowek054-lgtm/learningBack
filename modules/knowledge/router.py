@@ -15,7 +15,7 @@ from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph, resolve_node
-from modules.knowledge.study import start_step, submit_answer, weak_nodes
+from modules.knowledge.study import review_card_ids, start_step, submit_answer, weak_nodes
 from modules.knowledge.placement import (
     NoProbeAvailable,
     next_probe,
@@ -391,9 +391,11 @@ def start_course_step(domain: str, concept_id: str, user: CurrentUser, session: 
         activities = start_step(session, user.id, course, concept_id)
     except LookupError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    cards = review_card_ids(session, user.id, course, concept_id)
     session.commit()
     return {
         "conceptId": concept_id,
+        "reviewCards": cards,
         "activities": [
             {
                 "id": str(a.id),

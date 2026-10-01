@@ -256,3 +256,42 @@ def test_starting_a_step_without_a_course_is_404(session, client):
     response = client(make_user(session)).post(f"/graph/course/ml/step/{concept.id}/start")
 
     assert response.status_code == 404
+
+
+# ---- повторение — очередь карточек, а не Activity (A-0016, T-0004) ----
+
+
+def test_srs_step_is_not_an_activity_but_points_to_the_card(session):
+    from modules.knowledge.study import review_card_ids
+
+    user, concept, course = _prepared(session)
+
+    activities = start_step(session, user.id, course, str(concept.id))
+    cards = review_card_ids(session, user.id, course, str(concept.id))
+
+    assert "srs" not in [a.type for a in activities]
+    card = session.query(SrsCard).filter_by(user_id=user.id, concept_id=concept.id).one()
+    assert cards == [str(card.id)]
+
+
+def test_review_cards_is_idempotent_and_does_not_duplicate_cards(session):
+    from modules.knowledge.study import review_card_ids
+
+    user, concept, course = _prepared(session)
+
+    first = review_card_ids(session, user.id, course, str(concept.id))
+    second = review_card_ids(session, user.id, course, str(concept.id))
+
+    assert first == second
+    assert session.query(SrsCard).filter_by(user_id=user.id).count() == 1
+
+
+def test_start_endpoint_returns_review_cards(session, client):
+    user, concept, course = _prepared(session)
+
+    r = client(user).post(f"/graph/course/ml/step/{concept.id}/start", json={})
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["reviewCards"]) == 1
+    assert "srs" not in [a["type"] for a in body["activities"]]
