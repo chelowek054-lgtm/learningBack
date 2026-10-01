@@ -286,3 +286,92 @@ def test_pull_returns_card_updated_at(client, session):
     client(user).post("/sync/push", json={"srsCards": [_card(cid, 1, "2026-09-30T10:00:00+00:00")]})
     [card] = client(user).get("/sync/pull").json()["srsCards"]
     assert card["updatedAt"].startswith("2026-09-30T10:00:00")
+
+
+# ---- инкрементальный pull (T-0048) ----
+
+
+def _since_now(session):
+    """Время БД, а не хоста: часы контейнера Postgres могут расходиться с часами машины."""
+    from sqlalchemy import text
+
+    return session.execute(text("select clock_timestamp()")).scalar().isoformat()
+
+
+def test_pull_returns_user_id_and_cursor(client, session):
+    user = make_user(session)
+
+    body = client(user).get("/sync/pull").json()
+
+    assert body["userId"] == str(user.id)
+    assert datetime.fromisoformat(body["cursor"]) <= datetime.now(timezone.utc)
+
+
+def test_pull_since_returns_only_what_changed_after(client, session, rubrics):
+    user = make_user(session)
+    api = client(user)
+    first, *_ = _essay_push("first")
+    api.post("/sync/push", json=first)
+
+    since = _since_now(session)
+    second, aid2, rid2, _jid2 = _essay_push("second")
+    api.post("/sync/push", json=second)
+
+    pulled = api.get("/sync/pull", params={"since": since}).json()
+
+    assert [a["id"] for a in pulled["activities"]] == [str(aid2)]
+    assert [r["id"] for r in pulled["responses"]] == [str(rid2)]
+    assert len(pulled["jobs"]) == 1
+    assert all(c["source"] == "error_log" for c in pulled["srsCards"])
+    # Без since — по-прежнему всё.
+    assert len(api.get("/sync/pull").json()["activities"]) == 2
+
+
+def test_pull_since_in_the_future_is_empty(client, session, rubrics):
+    api = client(make_user(session))
+    api.post("/sync/push", json=_essay_push()[0])
+
+    body = api.get("/sync/pull", params={"since": "2999-01-01T00:00:00+00:00"}).json()
+
+    assert body["activities"] == body["responses"] == body["jobs"] == body["srsCards"] == []
+
+
+def test_pull_since_picks_up_grade_written_after_response_was_pushed(client, session, rubrics):
+    """Ответ уже был у клиента без оценки; оценка пришла позже — строка меняется и снова видна."""
+    user = make_user(session)
+    api = client(user)
+    payload, _aid, rid, _jid = _essay_push()
+    api.post("/sync/push", json={**payload, "jobs": []})
+    cursor = _since_now(session)
+
+    response = session.get(Response, rid)
+    response.grade = {"score": 7}
+    session.flush()
+
+    pulled = api.get("/sync/pull", params={"since": cursor}).json()
+
+    assert [r["id"] for r in pulled["responses"]] == [str(rid)]
+    assert pulled["responses"][0]["grade"] == {"score": 7}
+
+
+def test_pull_since_card_change_is_visible_even_with_older_client_time(client, session):
+    """Курсор строится по серверной метке, а не по client updated_at (LWW)."""
+    user = make_user(session)
+    api = client(user)
+    cid = uuid.uuid4()
+    card = {
+        "id": str(cid),
+        "module": "languages",
+        "front": {"word": "w"},
+        "back": {},
+        "source": "awl",
+        "fsrsState": {"reps": 1},
+        "dueAt": NOW,
+        "updatedAt": "2020-01-01T00:00:00+00:00",  # часы устройства отстают
+    }
+    since = _since_now(session)
+    api.post("/sync/push", json={"srsCards": [card]})
+
+    pulled = api.get("/sync/pull", params={"since": since}).json()
+
+    assert [c["id"] for c in pulled["srsCards"]] == [str(cid)]

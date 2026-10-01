@@ -76,6 +76,12 @@ class Activity(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     due_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
+    # Серверная метка последнего изменения строки: по ней `GET /sync/pull?since=`
+    # отдаёт только новое. clock_timestamp(), а не now(): now() постоянен внутри
+    # транзакции и не различает правки одного запроса.
+    server_updated_at: Mapped[datetime] = mapped_column(
+        _ts, server_default=func.clock_timestamp(), onupdate=func.clock_timestamp()
+    )
 
     __table_args__ = (Index("idx_activity_user_module_type", "user_id", "module", "type"),)
 
@@ -92,6 +98,12 @@ class Response(Base):
     grade: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # null пока job pending
     local_created_at: Mapped[datetime] = mapped_column(_ts, nullable=False)
     synced: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # Серверная метка последнего изменения строки: по ней `GET /sync/pull?since=`
+    # отдаёт только новое. clock_timestamp(), а не now(): now() постоянен внутри
+    # транзакции и не различает правки одного запроса.
+    server_updated_at: Mapped[datetime] = mapped_column(
+        _ts, server_default=func.clock_timestamp(), onupdate=func.clock_timestamp()
+    )
 
     __table_args__ = (Index("idx_response_user_synced", "user_id", "synced"),)
 
@@ -113,6 +125,12 @@ class SrsCard(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     # Момент последнего изменения состояния: по нему решается LWW при push.
     updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    # Серверная метка последнего изменения строки: по ней `GET /sync/pull?since=`
+    # отдаёт только новое. clock_timestamp(), а не now(): now() постоянен внутри
+    # транзакции и не различает правки одного запроса.
+    server_updated_at: Mapped[datetime] = mapped_column(
+        _ts, server_default=func.clock_timestamp(), onupdate=func.clock_timestamp()
+    )
 
     __table_args__ = (
         Index("idx_srs_user_due", "user_id", "due_at"),
@@ -136,6 +154,12 @@ class Job(Base):
     retry_after: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    # Серверная метка последнего изменения строки: по ней `GET /sync/pull?since=`
+    # отдаёт только новое. clock_timestamp(), а не now(): now() постоянен внутри
+    # транзакции и не различает правки одного запроса.
+    server_updated_at: Mapped[datetime] = mapped_column(
+        _ts, server_default=func.clock_timestamp(), onupdate=func.clock_timestamp()
+    )
 
     __table_args__ = (Index("idx_job_user_status", "user_id", "status"),)
 
