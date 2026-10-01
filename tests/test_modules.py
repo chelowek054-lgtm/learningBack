@@ -36,7 +36,11 @@ def test_duplicate_module_is_rejected():
 
 
 def test_grade_job_types_map_to_card_modules():
-    assert modules.grade_job_modules() == {"grade_writing": "languages", "grade_concept": "ml"}
+    assert modules.grade_job_modules() == {
+        "grade_writing": "languages",
+        "grade_concept": "ml",
+        "grade_code": "ml",
+    }
 
 
 def test_module_routers_are_mounted():

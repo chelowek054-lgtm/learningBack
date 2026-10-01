@@ -34,7 +34,7 @@ class MlModule(BackendModule):
         return RUBRICS
 
     def grade_jobs(self) -> dict[str, str]:
-        return {"grade_concept": MODULE_ID}
+        return {"grade_concept": MODULE_ID, "grade_code": MODULE_ID}
 
     def provision(self, session, user_id, subject, now: datetime) -> None:
         """Пробные задания по ML — только тому, кто учит ML."""

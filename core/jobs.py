@@ -58,6 +58,11 @@ def process_job(session: Session, job: Job, gateway: AIGateway) -> None:
         activity = session.get(Activity, response.activity_id)
         grade = gateway.grade(rubric, activity.payload if activity else {}, response.user_answer)
 
+        # Пометка рубрики об ограничениях оценки (например, «код не запускался»)
+        # едет вместе с оценкой: клиент показывает её рядом с баллами.
+        caveat = rubric.schema.get("caveat")
+        if caveat:
+            grade["caveat"] = caveat
         response.grade = grade
         # Ошибки → карточки SRS (error-log).
         partials = errors_to_card_partials(grade.get("errors", []))
