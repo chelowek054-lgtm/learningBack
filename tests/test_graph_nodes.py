@@ -39,7 +39,9 @@ def build(monkeypatch, session, client):
     def run(draft, refresh=False):
         state["draft"] = draft
         monkeypatch.setattr("modules.knowledge.router.build_graph", lambda *a, **k: state["draft"])
-        return api.post("/graph/canon/build", json={"domain": "d", "topic": "t", "refresh": refresh})
+        return api.post(
+            "/graph/canon/build", json={"domain": "d", "topic": "t", "refresh": refresh}
+        )
 
     return run
 
@@ -148,3 +150,104 @@ def test_node_endpoint_unknown_and_malformed_ids(session, client):
     api = client(make_user(session))
     assert api.get(f"/graph/nodes/{uuid.uuid4()}").status_code == 404
     assert api.get("/graph/nodes/not-a-uuid").status_code == 404
+
+
+# ---- T-0006: версия персональных узлов и задания по ним ----
+
+LONG = {
+    "summary": "Личный узел про градиентный спуск. " * 5,
+    "sections": [{"heading": "Идея", "body": "Идём против градиента. " * 20}],
+    "references": [],
+}
+
+
+def _own_node(api, content=LONG, title="Мой узел"):
+    r = api.post("/graph/nodes", json={"domain": "d", "title": title, "content": content})
+    return r.json()["userConceptId"]
+
+
+def _version(session, uc_id):
+    session.expire_all()
+    return session.get(UserConcept, uc_id).version
+
+
+def test_personal_node_starts_at_version_one_and_edit_raises_it(session, client):
+    api = client(make_user(session))
+    uc_id = _own_node(api)
+    assert _version(session, uc_id) == 1
+
+    api.put(f"/graph/user-nodes/{uc_id}", json={"content": {**LONG, "summary": "новое"}})
+    assert _version(session, uc_id) == 2
+
+    api.put(f"/graph/user-nodes/{uc_id}", json={"title": "Другое имя"})
+    assert _version(session, uc_id) == 3
+
+
+def test_resaving_same_content_does_not_raise_version(session, client):
+    api = client(make_user(session))
+    uc_id = _own_node(api)
+    stored = session.get(UserConcept, uc_id).content_override
+
+    api.put(f"/graph/user-nodes/{uc_id}", json={"content": stored})
+    api.put(f"/graph/user-nodes/{uc_id}", json={"mastery": {"p": 0.5}})
+
+    assert _version(session, uc_id) == 1
+
+
+def test_graph_reports_real_version_of_personal_node(session, client):
+    api = client(make_user(session))
+    uc_id = _own_node(api)
+    api.put(f"/graph/user-nodes/{uc_id}", json={"title": "Иначе"})
+
+    node = next(n for n in api.get("/graph/d").json()["nodes"] if n["id"] == uc_id)
+
+    assert node["version"] == 2
+
+
+def test_assessment_for_personal_node_is_generated_then_cached(session, client):
+    api = client(make_user(session))
+    uc_id = _own_node(api)
+    url = f"/graph/nodes/{uc_id}/assessment?bloom=remember&kind=test"
+
+    first = api.get(url)
+    assert first.status_code == 200, first.text
+    assert first.json()["cached"] is False
+    assert first.json()["conceptVersion"] == 1
+
+    assert api.get(url).json()["cached"] is True
+
+
+def test_editing_personal_node_invalidates_its_assessments(session, client):
+    from modules.knowledge.models import Assessment
+
+    api = client(make_user(session))
+    uc_id = _own_node(api)
+    url = f"/graph/nodes/{uc_id}/assessment?bloom=remember&kind=test"
+    api.get(url)
+
+    api.put(f"/graph/user-nodes/{uc_id}", json={"content": {**LONG, "summary": "правка " * 30}})
+    after = api.get(url).json()
+
+    assert after["cached"] is False
+    assert after["conceptVersion"] == 2
+    # Строки прошлой версии вычищены, таблица не растёт на каждую правку.
+    rows = session.query(Assessment).filter_by(concept_id=uuid.UUID(uc_id)).all()
+    assert {r.concept_version for r in rows} == {2}
+
+
+def test_assessment_of_other_users_node_is_not_found(session, client):
+    owner, stranger = make_user(session), make_user(session)
+    uc_id = _own_node(client(owner))
+
+    r = client(stranger).get(f"/graph/nodes/{uc_id}/assessment?bloom=remember&kind=test")
+
+    assert r.status_code == 404
+
+
+def test_assessment_of_personal_node_without_theory_is_conflict(session, client):
+    api = client(make_user(session))
+    uc_id = _own_node(api, content={"summary": "коротко"})
+
+    r = api.get(f"/graph/nodes/{uc_id}/assessment?bloom=remember&kind=test")
+
+    assert r.status_code == 409

@@ -26,9 +26,7 @@ def _lighten(node: dict[str, Any], light: bool) -> dict[str, Any]:
     return node
 
 
-def resolve_node(
-    c: Concept | None, uc: UserConcept | None, light: bool = False
-) -> dict[str, Any]:
+def resolve_node(c: Concept | None, uc: UserConcept | None, light: bool = False) -> dict[str, Any]:
     """Эффективный узел: канон + персональный оверрайд, либо свой персональный узел."""
     return _lighten(_resolve(c, uc), light)
 
@@ -67,7 +65,7 @@ def _resolve(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
         "content": ensure_shape(uc.content_override),
         "bloomLevels": [],
         "difficulty": 1,
-        "version": 1,
+        "version": uc.version,
         "mastery": uc.mastery,
         "status": uc.status,
         "origin": uc.origin,

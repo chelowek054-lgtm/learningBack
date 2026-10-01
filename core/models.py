@@ -36,9 +36,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     # Версия сессий: смена пароля увеличивает её, и прежние токены перестают действовать.
-    token_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Доступ в админку и курирование канона. Выдаётся только через scripts/createsuperuser.
     is_superuser: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")

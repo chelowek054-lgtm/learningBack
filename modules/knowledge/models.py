@@ -83,6 +83,8 @@ class UserConcept(Base):
     )
     title: Mapped[str | None] = mapped_column(String, nullable=True)  # для своих узлов
     content_override: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Растёт с каждой правкой заголовка/теории: на версии держится кэш заданий.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     mastery: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'locked'"))
     origin: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'inherited'"))
