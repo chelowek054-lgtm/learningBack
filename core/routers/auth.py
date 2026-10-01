@@ -92,7 +92,7 @@ def password_reset_request(
             )
         )
         session.commit()
-        if settings.app_env not in ("staging", "production"):
+        if not settings.is_deployed:
             log.warning("Код восстановления для %s: %s (доставки пока нет)", user.email, code)
     return {"status": "accepted", "ttl_minutes": settings.password_reset_code_ttl_minutes}
 

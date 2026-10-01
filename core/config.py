@@ -16,6 +16,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # В образе корня нет: файла не окажется, и настройки придут из окружения.
 ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
 
+# Окружения, где запуск с dev-умолчаниями недопустим.
+DEPLOYED_ENVS = frozenset({"staging", "production", "prod"})
+DEV_JWT_SECRET = "dev-insecure-change-me"
+DEV_POSTGRES_PASSWORD = "praxis"
+MIN_SECRET_LENGTH = 32
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ROOT_ENV, extra="ignore")
@@ -32,6 +38,33 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     # Пусто → собирается из POSTGRES_*. Compose передаёт готовый URL явно.
     database_url: str = ""
+
+    @property
+    def is_deployed(self) -> bool:
+        """staging/production: здесь dev-умолчания недопустимы и секреты не пишутся в лог."""
+        return self.app_env.lower() in DEPLOYED_ENVS
+
+    @model_validator(mode="after")
+    def _forbid_dev_secrets(self) -> "Settings":
+        """Сервер не стартует в staging/production с dev-секретами (T-0032).
+
+        Проверка идёт до сборки `database_url`: пароль БД важен, только если URL
+        собирается из POSTGRES_*, а не задан compose'ом целиком.
+        """
+        if not self.is_deployed:
+            return self
+        problems: list[str] = []
+        if self.jwt_secret == DEV_JWT_SECRET:
+            problems.append("JWT_SECRET: dev-значение по умолчанию")
+        elif len(self.jwt_secret) < MIN_SECRET_LENGTH:
+            problems.append(f"JWT_SECRET: короче {MIN_SECRET_LENGTH} символов")
+        if not self.database_url and self.postgres_password == DEV_POSTGRES_PASSWORD:
+            problems.append("POSTGRES_PASSWORD: dev-значение по умолчанию")
+        if problems:
+            raise ValueError(
+                f"APP_ENV={self.app_env}: небезопасные секреты — " + "; ".join(problems)
+            )
+        return self
 
     @model_validator(mode="after")
     def _compose_database_url(self) -> "Settings":
@@ -67,7 +100,7 @@ class Settings(BaseSettings):
     cors_origins: str = "*"
 
     # JWT (свой auth). Секрет — из окружения; дефолт только для dev.
-    jwt_secret: str = "dev-insecure-change-me"
+    jwt_secret: str = DEV_JWT_SECRET
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 30  # 30 дней (MVP «для себя»)
 
