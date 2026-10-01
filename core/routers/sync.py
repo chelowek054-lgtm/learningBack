@@ -3,12 +3,13 @@
 Push: клиент шлёт локальные изменения (activities/responses/srs/jobs) → сервер
 принимает (user_id форсится из токена), обрабатывает pending-jobs, отдаёт ack.
 Pull: сервер отдаёт свои изменения (grade'ы, сгенерированные карточки, активности).
-MVP: LWW перезаписью по id; `since`-оптимизация — позже.
+LWW по id; pull принимает `since` (курсор прошлого ответа) и отдаёт только новое.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
+from sqlalchemy import func, select
 
 from core.ai_gateway import get_ai_gateway
 from core.deps import CurrentUser, SessionDep
@@ -121,16 +122,42 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
     return SyncPushOut(ack_ids=ack)
 
 
+# Запас курсора: транзакция, начатая до момента курсора, может закоммититься после
+# него, и её строки с меткой раньше курсора не попали бы ни в один pull. Повторная
+# отдача безвредна — клиент применяет записи идемпотентно.
+CURSOR_SLACK = timedelta(seconds=10)
+
+
 @router.get("/pull", response_model=SyncPullOut)
-def pull(user: CurrentUser, session: SessionDep) -> SyncPullOut:
-    activities = session.query(Activity).filter(Activity.user_id == user.id).all()
-    responses = session.query(Response).filter(Response.user_id == user.id).all()
-    jobs = (
-        session.query(Job).filter(Job.user_id == user.id, Job.status.in_(("done", "failed"))).all()
-    )
-    cards = session.query(SrsCard).filter(SrsCard.user_id == user.id).all()
+def pull(
+    user: CurrentUser,
+    session: SessionDep,
+    since: datetime | None = Query(None, description="курсор из прошлого pull; пусто — всё"),
+) -> SyncPullOut:
+    """Серверные изменения пользователя: всё или только новее `since`."""
+    # Время берём из БД: метки строк ставит она, и курсор должен идти по её часам.
+    cursor = session.execute(select(func.clock_timestamp())).scalar_one() - CURSOR_SLACK
+
+    def changed(q, column):
+        return q if since is None else q.filter(column >= since)
+
+    activities = changed(
+        session.query(Activity).filter(Activity.user_id == user.id), Activity.server_updated_at
+    ).all()
+    responses = changed(
+        session.query(Response).filter(Response.user_id == user.id), Response.server_updated_at
+    ).all()
+    jobs = changed(
+        session.query(Job).filter(Job.user_id == user.id, Job.status.in_(("done", "failed"))),
+        Job.server_updated_at,
+    ).all()
+    cards = changed(
+        session.query(SrsCard).filter(SrsCard.user_id == user.id), SrsCard.server_updated_at
+    ).all()
 
     return SyncPullOut(
+        user_id=user.id,
+        cursor=cursor,
         activities=[ActivityIO.model_validate(a) for a in activities],
         responses=[ResponseIO.model_validate(r) for r in responses],
         jobs=[JobIO.model_validate(j) for j in jobs],

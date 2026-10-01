@@ -113,6 +113,9 @@ class SyncPushOut(_CamelModel):
 
 
 class SyncPullOut(_CamelModel):
+    user_id: uuid.UUID
+    # Курсор для следующего pull: клиент отдаёт его как `since`.
+    cursor: datetime
     activities: list[ActivityIO]
     responses: list[ResponseIO]
     jobs: list[JobIO]
