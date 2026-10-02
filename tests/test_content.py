@@ -22,7 +22,14 @@ FULL = {
             "counter_examples": ["заблуждение"],
         }
     ],
-    "references": [{"title": "Книга", "url": "https://example.com"}],
+    "references": [
+        {
+            "title": "Книга",
+            "url": "https://example.com",
+            "material_id": None,
+            "fragment_ids": [],
+        }
+    ],
 }
 
 
