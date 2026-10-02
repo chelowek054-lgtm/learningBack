@@ -42,8 +42,13 @@ def test_toefl_subject_gets_toefl_writing_with_its_rubric(session):
 
     provision_subject(session, user.id, {"id": "toefl", "title": "TOEFL iBT"}, NOW)
 
-    assert _types(session, user) == {"toefl_writing_independent"}
-    payload = session.query(Activity).filter_by(user_id=user.id).one().payload
+    assert _types(session, user) == {"toefl_writing_independent", "reading_drill"}
+    payload = (
+        session.query(Activity)
+        .filter_by(user_id=user.id, type="toefl_writing_independent")
+        .one()
+        .payload
+    )
     assert payload["rubricId"] == "toefl_writing_independent"
     assert payload["prompt"]
 
@@ -53,7 +58,7 @@ def test_ielts_subject_still_gets_ielts_writing(session):
 
     provision_subject(session, user.id, {"id": "ielts", "title": "IELTS"}, NOW)
 
-    assert _types(session, user) == {"ielts_writing_task2", "ielts_writing_task1"}
+    assert _types(session, user) == {"ielts_writing_task2", "ielts_writing_task1", "reading_drill"}
 
 
 def test_provisioning_twice_does_not_duplicate(session):
@@ -65,7 +70,7 @@ def test_provisioning_twice_does_not_duplicate(session):
     provision_subject(session, user.id, subject, NOW)
     session.flush()
 
-    assert session.query(Activity).filter_by(user_id=user.id).count() == 1
+    assert session.query(Activity).filter_by(user_id=user.id).count() == 2  # письмо и чтение
 
 
 def test_toefl_essay_is_graded_by_toefl_rubric(client, session):

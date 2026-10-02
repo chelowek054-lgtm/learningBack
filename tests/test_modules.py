@@ -117,7 +117,7 @@ def test_provisioning_is_idempotent(client, session):
     _set_subject(client, user, "IELTS Academic")
     assert session.query(SrsCard).filter_by(user_id=user.id, source="awl").count() == 10
     assert (
-        session.query(Activity).filter_by(user_id=user.id).count() == 2
+        session.query(Activity).filter_by(user_id=user.id).count() == 3
     )  # письмо Task 2 и описание данных Task 1
 
 

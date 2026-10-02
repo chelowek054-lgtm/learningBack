@@ -42,6 +42,60 @@ DEMO_ESSAY_PROMPT = (
 )
 
 
+# Reading-дрилл: текст, вопросы трёх форматов и время. Верные ответы лежат в payload —
+# проверка локальная и мгновенная, без сети (R-0022); это тренировка, а не экзамен.
+DEMO_READING_PAYLOAD: dict[str, Any] = {
+    "title": "The Rise of Urban Gardens",
+    "timeLimitSec": 600,
+    "passage": (
+        "Urban gardens have spread rapidly across large cities over the past two decades. "
+        "Residents turn unused rooftops, vacant lots and balconies into small farms, "
+        "growing vegetables, herbs and fruit. Supporters argue that these gardens reduce "
+        "food transport costs, improve air quality and give neighbours a place to meet.\n\n"
+        "Critics, however, point out that urban gardens produce only a small share of a "
+        "city's food. Soil in some districts contains lead and other pollutants, so "
+        "produce must be tested before it is eaten. Several city councils have therefore "
+        "introduced guidelines requiring regular soil tests before a garden may open."
+    ),
+    "questions": [
+        {
+            "id": "q1",
+            "type": "mcq",
+            "prompt": "According to the passage, supporters say urban gardens...",
+            "options": [
+                "replace supermarkets completely",
+                "reduce food transport costs",
+                "make soil cleaner",
+                "need no regulation",
+            ],
+            "answer": "reduce food transport costs",
+            "explanation": "Supporters name transport costs, air quality and meeting places.",
+        },
+        {
+            "id": "q2",
+            "type": "tfng",
+            "prompt": "Urban gardens produce most of the food that a city consumes.",
+            "answer": "false",
+            "explanation": "Critics say they produce only a small share.",
+        },
+        {
+            "id": "q3",
+            "type": "tfng",
+            "prompt": "Every city in the world has introduced soil testing rules.",
+            "answer": "not given",
+            "explanation": "Only 'several city councils' are mentioned.",
+        },
+        {
+            "id": "q4",
+            "type": "gap",
+            "prompt": "Produce must be ____ before it is eaten.",
+            "answer": ["tested"],
+            "explanation": "The passage says produce must be tested before it is eaten.",
+        },
+    ],
+}
+
+
 # Задание Task 1: данные лежат в payload, клиент рисует их сам (картинка не обязательна).
 DEMO_TASK1_PAYLOAD: dict[str, Any] = {
     "prompt": (
@@ -113,6 +167,22 @@ class LanguagesModule(BackendModule):
                     type=activity_type,
                     connectivity="online",
                     payload={"prompt": prompt, "rubricId": rubric_id},
+                )
+            )
+        # Чтение нужно и IELTS, и TOEFL.
+        if (
+            session.query(Activity)
+            .filter_by(user_id=user_id, module=MODULE_ID, type="reading_drill")
+            .first()
+            is None
+        ):
+            session.add(
+                Activity(
+                    user_id=user_id,
+                    module=MODULE_ID,
+                    type="reading_drill",
+                    connectivity="offline",
+                    payload=DEMO_READING_PAYLOAD,
                 )
             )
         # IELTS — ещё и описание данных (Task 1); TOEFL такого задания не имеет.
