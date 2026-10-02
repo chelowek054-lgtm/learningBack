@@ -99,7 +99,7 @@ class Settings(BaseSettings):
 
     # Подключённые предметные модули (ADR-0019). Ядро про них ничего не знает:
     # каждый пункт — пакет с объектом `backend` (наследник core.modules.BackendModule).
-    installed_modules: str = "modules.languages,modules.ml,modules.knowledge"
+    installed_modules: str = "modules.languages,modules.ml,modules.knowledge,modules.srs"
 
     # CORS: список origin через запятую, или "*" (для web-клиента Expo на :8081).
     cors_origins: str = "*"

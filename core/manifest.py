@@ -21,7 +21,16 @@ CONTRACT_VERSION = "1.0"
 # Что модуль может ДАВАТЬ ядру: каждое — точка расширения контракта `BackendModule`.
 # Список намеренно короткий: ровно то, чем пользуются три базовых модуля (без «на вырост»).
 PROVIDES = frozenset(
-    {"routes", "rubrics", "grade_jobs", "provision", "apply_activity", "admin_views"}
+    {
+        "routes",
+        "rubrics",
+        "grade_jobs",
+        "provision",
+        "apply_activity",
+        "admin_views",
+        "study_methods",
+        "evidence",
+    }
 )
 
 # Что модуль может ПРОСИТЬ у ядра: доступ к общим данным и к модели. Пока это декларация —

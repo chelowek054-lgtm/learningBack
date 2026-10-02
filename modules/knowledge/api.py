@@ -11,10 +11,11 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
+
+from core.evidence import Evidence
 
 from modules.knowledge.cow import effective_graph, resolve_node
 from modules.knowledge.events import NodeChanged, subscribe, unsubscribe
@@ -33,20 +34,6 @@ __all__ = [
     "subscribe",
     "unsubscribe",
 ]
-
-
-@dataclass(frozen=True)
-class Evidence:
-    """Свидетельство об освоении: единый формат для любого способа запоминания.
-
-    `score` — результат от 0 до 1 по ступени `bloom`; `source` — кто сообщил (идентификатор
-    способа). Граф по источнику ничего не решает, он нужен для разбора и журнала.
-    """
-
-    concept_id: uuid.UUID
-    bloom: str
-    score: float
-    source: str = "unknown"
 
 
 def get_node(session: Session, user_id: uuid.UUID, node_id: uuid.UUID) -> dict[str, Any] | None:
