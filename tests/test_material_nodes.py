@@ -210,3 +210,72 @@ def test_material_without_fragments_is_conflict(session, client):
     m = _material(session, user, fragments=[])
 
     assert client(user).post(f"/graph/materials/{m.id}/propose").status_code == 409
+
+
+# ---- вопросы на вспоминание из материала (T-0016) ----
+
+
+def test_questions_become_concept_recall_activities_grounded_in_fragments(session, client):
+    from core.models import Activity
+
+    user = make_user(session)
+    m = _material(session, user)
+
+    r = client(user).post(f"/graph/materials/{m.id}/questions?count=2")
+
+    assert r.status_code == 201, r.text
+    assert r.json()["created"] == 2
+    acts = session.query(Activity).filter_by(user_id=user.id, type="concept_recall").all()
+    assert len(acts) == 2
+    payload = acts[0].payload
+    assert payload["prompt"] and payload["materialId"] == str(m.id)
+    assert payload["fragmentIds"] and acts[0].connectivity == "online"
+
+
+def test_asking_for_questions_twice_does_not_duplicate(session, client):
+    from core.models import Activity
+
+    user = make_user(session)
+    m = _material(session, user)
+    api = client(user)
+
+    api.post(f"/graph/materials/{m.id}/questions?count=3")
+    second = api.post(f"/graph/materials/{m.id}/questions?count=3")
+
+    assert second.json()["created"] == 0
+    assert session.query(Activity).filter_by(user_id=user.id, type="concept_recall").count() == 3
+
+
+def test_model_questions_without_grounding_are_dropped(session, monkeypatch):
+    from modules.knowledge.material_graph import propose_questions
+
+    class Gateway:
+        def structured(self, *a, **k):
+            return {
+                "questions": [
+                    {"prompt": "Что такое шаг?", "concept": "шаг", "fragments": ["f2"]},
+                    {"prompt": "Выдумка?", "concept": "x", "fragments": ["ghost"]},
+                    {"prompt": "", "concept": "y", "fragments": ["f1"]},
+                ]
+            }
+
+    monkeypatch.setattr("modules.knowledge.material_graph.has_llm", lambda: True)
+    monkeypatch.setattr("modules.knowledge.material_graph.get_ai_gateway", lambda: Gateway())
+
+    qs = propose_questions(_material(session, make_user(session)))
+
+    assert [q["prompt"] for q in qs] == ["Что такое шаг?"]
+
+
+def test_questions_for_foreign_material_are_not_found(session, client):
+    owner, stranger = make_user(session), make_user(session)
+    m = _material(session, owner)
+
+    assert client(stranger).post(f"/graph/materials/{m.id}/questions").status_code == 404
+
+
+def test_question_count_is_bounded(session, client):
+    user = make_user(session)
+    m = _material(session, user)
+
+    assert client(user).post(f"/graph/materials/{m.id}/questions?count=99").status_code == 422

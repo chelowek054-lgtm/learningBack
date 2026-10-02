@@ -15,7 +15,13 @@ from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph, resolve_node
-from modules.knowledge.study import review_card_ids, start_step, submit_answer, weak_nodes
+from modules.knowledge.study import (
+    MODULE_ID,
+    review_card_ids,
+    start_step,
+    submit_answer,
+    weak_nodes,
+)
 from modules.knowledge.promotion import NotPromotable, candidates, promote
 from modules.knowledge.placement import (
     NoProbeAvailable,
@@ -28,6 +34,7 @@ from modules.knowledge.material_graph import (
     material_fragments,
     node_content,
     propose,
+    propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
 from modules.knowledge.schemas import (
@@ -617,6 +624,47 @@ def accept_nodes_from_material(
             )
     session.commit()
     return {"created": created, "graph": effective_graph(session, user.id, body.domain)}
+
+
+@router.post("/materials/{material_id}/questions", status_code=status.HTTP_201_CREATED)
+def questions_from_material(
+    material_id: str,
+    user: CurrentUser,
+    session: SessionDep,
+    count: int = Query(5, ge=1, le=10),
+) -> dict:
+    """Вопросы на вспоминание по материалу → Activity `concept_recall` (оценка — по рубрике)."""
+    material = _own_material(session, user, material_id)
+    existing = {
+        a.payload.get("prompt")
+        for a in session.query(Activity).filter(
+            Activity.user_id == user.id,
+            Activity.module == MODULE_ID,
+            Activity.type == "concept_recall",
+            Activity.payload["materialId"].astext == str(material.id),
+        )
+    }
+    created = []
+    for q in propose_questions(material, count):
+        if q["prompt"] in existing:
+            continue  # повторный запрос не плодит те же вопросы
+        activity = Activity(
+            user_id=user.id,
+            module=MODULE_ID,
+            type="concept_recall",
+            connectivity="online",
+            payload={
+                "prompt": q["prompt"],
+                "concept": q["concept"],
+                "materialId": str(material.id),
+                "fragmentIds": q["fragments"],
+            },
+        )
+        session.add(activity)
+        session.flush()
+        created.append({"id": str(activity.id), **q})
+    session.commit()
+    return {"created": len(created), "questions": created}
 
 
 # ---- персональный слой (COW) ----

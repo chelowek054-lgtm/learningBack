@@ -110,7 +110,7 @@ def _fixture(fragments: list[dict[str, Any]]) -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
-def _prompt(material: Material, fragments: list[dict[str, Any]]) -> str:
+def _prompt_body(fragments: list[dict[str, Any]]) -> str:
     parts = []
     for f in fragments:
         label = f"[{f['id']}]"
@@ -119,6 +119,10 @@ def _prompt(material: Material, fragments: list[dict[str, Any]]) -> str:
         if f.get("page"):
             label += f" (стр. {f['page']})"
         parts.append(f"{label}\n{str(f.get('text', ''))[:MAX_FRAGMENT_PROMPT_CHARS]}")
+    return "\n\n".join(parts)
+
+
+def _prompt(material: Material, fragments: list[dict[str, Any]]) -> str:
     return (
         f"Из материала «{material.title}» выдели НЕ БОЛЕЕ {MAX_NODES} понятий для личного графа "
         "знаний. Каждое понятие описывай ТОЛЬКО по тексту материала, ничего не додумывай.\n"
@@ -126,7 +130,7 @@ def _prompt(material: Material, fragments: list[dict[str, Any]]) -> str:
         "sections и fragments — id фрагментов в квадратных скобках, на которых понятие "
         "стоит. Без ссылки на фрагмент понятие не принимается.\n"
         "Связи: prereq (предпосылка), specializes (общее→частное), related.\n\n"
-        + "\n\n".join(parts)
+        + _prompt_body(fragments)
     )
 
 
@@ -205,3 +209,87 @@ def node_content(material: Material, node: dict[str, Any]) -> dict[str, Any]:
             }
         ],
     }
+
+
+# ---- вопросы на вспоминание из материала (T-0016) ----
+
+QUESTIONS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "вопрос, на который отвечают своими словами",
+                    },
+                    "concept": {"type": "string", "description": "о каком понятии вопрос"},
+                    "fragments": {
+                        "type": "array",
+                        "description": "id фрагментов, по которым можно проверить ответ",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["prompt", "concept", "fragments"],
+            },
+        }
+    },
+    "required": ["questions"],
+}
+
+MAX_QUESTIONS = 10
+
+
+def _fixture_questions(fragments: list[dict[str, Any]], count: int) -> dict[str, Any]:
+    """Без ключа модели: по вопросу на фрагмент с заголовком, по тексту самого материала."""
+    out = []
+    for f in fragments:
+        heading = (f.get("heading") or "").strip()
+        if heading:
+            out.append(
+                {
+                    "prompt": f"Объясните своими словами: {heading}",
+                    "concept": heading,
+                    "fragments": [f["id"]],
+                }
+            )
+        if len(out) >= count:
+            break
+    return {"questions": out}
+
+
+def propose_questions(material: Material, count: int = 5) -> list[dict[str, Any]]:
+    """Вопросы concept_recall по материалу; каждый опирается на существующий фрагмент."""
+    count = max(1, min(count, MAX_QUESTIONS))
+    fragments = material_fragments(material)
+    used = fragments[:MAX_PROMPT_FRAGMENTS]
+    if has_llm():
+        raw = get_ai_gateway().structured(
+            "submit_questions",
+            "Вернуть вопросы на вспоминание по материалу.",
+            QUESTIONS_SCHEMA,
+            f"Составь {count} вопросов для проверки понимания материала «{material.title}». "
+            "Вопрос открытый: отвечают своими словами. Опирайся ТОЛЬКО на текст материала, "
+            "укажи id фрагментов в квадратных скобках, по которым проверяется ответ.\n\n"
+            + _prompt_body(used),
+        )
+    else:
+        raw = _fixture_questions(used, count)
+    known = {str(f["id"]) for f in used}
+    questions = []
+    for q in raw.get("questions", []) or []:
+        if not isinstance(q, dict):
+            continue
+        refs = [str(r) for r in (q.get("fragments") or []) if str(r) in known]
+        prompt = str(q.get("prompt", "")).strip()
+        if prompt and refs:  # вопрос без опоры на текст — не из материала
+            questions.append(
+                {
+                    "prompt": prompt,
+                    "concept": str(q.get("concept", "")).strip(),
+                    "fragments": list(dict.fromkeys(refs)),
+                }
+            )
+    return questions[:count]
