@@ -174,23 +174,27 @@ def _node(key: str, title: str, tier: str) -> dict[str, Any]:
 
 
 def _fixture_graph(topic: str) -> dict[str, Any]:  # noqa: ARG001
+    """Заглушка без ключа модели: граф из ролей, а не из предметных понятий.
+
+    Модуль графа не знает предметов (R-0028), поэтому узлы называются тем, что есть у
+    любой области: основы, принципы, методы, типичные ошибки, применение. Заголовок НЕ
+    зависит от topic: дедупликация идёт по title, и переменное имя плодило бы дубли.
+    """
     nodes = [
-        _node("linear_algebra", "Линейная алгебра", "core"),
-        _node("neural_nets", "Нейросети", "core"),
-        _node("backprop", "Backprop", "core"),
-        _node("softmax", "Softmax", "derived"),
-        _node("attention", "Attention", "derived"),
-        # Заголовок НЕ зависит от topic: дедупликация идёт по title, и
-        # переменное имя плодило дубли узла при каждом новом topic.
-        _node("transformers", "Трансформеры", "derived"),
+        _node("foundations", "Основные понятия", "core"),
+        _node("principles", "Ключевые принципы", "core"),
+        _node("methods", "Базовые методы", "core"),
+        _node("pitfalls", "Типичные ошибки", "derived"),
+        _node("patterns", "Устойчивые приёмы", "derived"),
+        _node("application", "Применение на практике", "derived"),
     ]
     edges = [
-        {"from": "linear_algebra", "to": "neural_nets", "type": "prereq"},
-        {"from": "neural_nets", "to": "backprop", "type": "prereq"},
-        {"from": "neural_nets", "to": "softmax", "type": "prereq"},
-        {"from": "backprop", "to": "attention", "type": "prereq"},
-        {"from": "attention", "to": "transformers", "type": "prereq"},
-        {"from": "softmax", "to": "attention", "type": "prereq"},
+        {"from": "foundations", "to": "principles", "type": "prereq"},
+        {"from": "principles", "to": "methods", "type": "prereq"},
+        {"from": "principles", "to": "pitfalls", "type": "prereq"},
+        {"from": "methods", "to": "patterns", "type": "prereq"},
+        {"from": "patterns", "to": "application", "type": "prereq"},
+        {"from": "pitfalls", "to": "patterns", "type": "prereq"},
     ]
     return {"nodes": nodes, "edges": edges}
 
