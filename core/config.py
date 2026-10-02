@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 30  # 30 дней (MVP «для себя»)
 
+    # Пороги алертов мониторинга (T-0050). Окно общее; 0 у лимита выключает соответствующий алерт.
+    alert_window_hours: int = 24
+    # Доля упавших среди завершённых задач и минимум задач, начиная с которого доля что-то значит.
+    alert_failed_jobs_ratio: float = 0.2
+    alert_min_jobs: int = 5
+    alert_tokens_per_window: int = 0
+    alert_client_errors: int = 0
+
     # Повтор AI-задач при временных сбоях: сколько попыток и базовая отсрочка
     # (растёт вдвое с каждой неудачей).
     job_max_attempts: int = 3
