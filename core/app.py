@@ -3,7 +3,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.admin import setup_admin
@@ -13,6 +13,7 @@ from core.db import SessionLocal
 from core.usage import UserContextMiddleware
 from core.versioning import ClientVersionMiddleware, version_info
 from core.routers import auth, content, jobs, sync
+from core.routers import modules_admin
 from core.routers import monitoring as monitoring_router
 from core.routers import usage as usage_router
 
@@ -27,6 +28,8 @@ async def lifespan(_: FastAPI):
     """
     try:
         with SessionLocal() as session:
+            for line in modules.sync_module_state(session):
+                log.info("Модули: %s", line)
             added = modules.sync_rubrics(session)
             session.commit()
         if added:
@@ -65,11 +68,16 @@ _routers = [
     auth.router,
     usage_router.router,
     monitoring_router.router,
-    *modules.routers(),
+    modules_admin.router,
 ]
 for _router in _routers:
     app.include_router(_router, prefix="/v1")
     app.include_router(_router, include_in_schema=False)
+# Маршруты модулей: отключённый модуль отвечает 503, а не 500 и не молчит (C-0001).
+for _module_id, _router in modules.module_routers():
+    _guard = [Depends(modules.require_enabled(_module_id))]
+    app.include_router(_router, prefix="/v1", dependencies=_guard)
+    app.include_router(_router, include_in_schema=False, dependencies=_guard)
 
 # Админка на /admin (вход — только is_superuser; см. scripts/createsuperuser.py).
 setup_admin(app)

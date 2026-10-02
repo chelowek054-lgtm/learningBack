@@ -10,6 +10,7 @@ knowledge → core.
 
 from __future__ import annotations
 
+from core.manifest import ModuleManifest
 from core.modules import BackendModule
 
 MODULE_ID = "knowledge"
@@ -17,6 +18,15 @@ MODULE_ID = "knowledge"
 
 class KnowledgeModule(BackendModule):
     id = MODULE_ID
+    manifest = ModuleManifest(
+        id=MODULE_ID,
+        title="Граф знаний, курс и плейсмент",
+        version="1.0",
+        provides=frozenset({"routes", "admin_views"}),
+        requires=frozenset(
+            {"ai.structured", "data.activity", "data.response", "data.srs_card", "data.material"}
+        ),
+    )
 
     def router(self):
         from modules.knowledge.router import router

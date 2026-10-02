@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from core.models import Activity, SrsCard
+from core.manifest import ModuleManifest
 from core.modules import BackendModule
 from core.srs import insert_cards
 from modules.languages.generators import awl_card_partials
@@ -140,6 +141,13 @@ def demo_writing(subject: dict[str, Any]) -> tuple[str, str, str]:
 
 class LanguagesModule(BackendModule):
     id = MODULE_ID
+    manifest = ModuleManifest(
+        id=MODULE_ID,
+        title="Языки: письмо, чтение, словарь",
+        version="1.0",
+        provides=frozenset({"rubrics", "grade_jobs", "provision"}),
+        requires=frozenset({"data.activity", "data.srs_card"}),
+    )
 
     def rubrics(self) -> list[dict[str, Any]]:
         return RUBRICS
