@@ -28,6 +28,33 @@ IELTS_WRITING_TASK2 = {
     },
 }
 
+IELTS_WRITING_TASK1 = {
+    "id": "ielts_writing_task1",
+    "version": 1,
+    "module": "languages",
+    "model": "",
+    "prompt": (
+        "Ты — экзаменатор IELTS Academic Writing Task 1: описание графика, таблицы или схемы "
+        "(не менее 150 слов). Оцени по официальным band descriptors (0–9) по четырём "
+        "критериям: Task Achievement (выделены ли ключевые признаки и тенденции, есть ли "
+        "общий обзор, точны ли данные — мнения и объяснения причин в этом задании не нужны), "
+        "Coherence and Cohesion, Lexical Resource, Grammatical Range and Accuracy. Для каждого "
+        "дай балл (0–9) и краткий комментарий. Итоговый overall — среднее, округлённое до 0.5. "
+        "Сверяй числа в тексте с данными задания: неверная цифра — ошибка Task Achievement. "
+        "Выпиши ключевые ошибки с корректировкой и объяснением и приведи улучшенный образец "
+        "1–2 проблемных предложений."
+    ),
+    "schema": {
+        "criteria": [
+            {"name": "Task Achievement", "max": 9},
+            {"name": "Coherence and Cohesion", "max": 9},
+            {"name": "Lexical Resource", "max": 9},
+            {"name": "Grammatical Range and Accuracy", "max": 9},
+        ],
+        "grade_schema": GRADE_JSON_SCHEMA,
+    },
+}
+
 TOEFL_WRITING_INDEPENDENT = {
     "id": "toefl_writing_independent",
     "version": 1,
@@ -76,4 +103,9 @@ TOEFL_WRITING_INTEGRATED = {
     },
 }
 
-RUBRICS = [IELTS_WRITING_TASK2, TOEFL_WRITING_INDEPENDENT, TOEFL_WRITING_INTEGRATED]
+RUBRICS = [
+    IELTS_WRITING_TASK2,
+    IELTS_WRITING_TASK1,
+    TOEFL_WRITING_INDEPENDENT,
+    TOEFL_WRITING_INTEGRATED,
+]

@@ -1,5 +1,6 @@
 """Контракт AI-gateway (см. 02-logical §6). Реализации: mock.py, openai_compatible.py."""
 
+import json
 from typing import Any, Protocol
 
 from core.models import Rubric
@@ -76,9 +77,15 @@ class AIGateway(Protocol):
 def render_prompt(rubric: Rubric, activity_payload: dict[str, Any], answer: Any) -> str:
     """Промпт = шаблон рубрики + задание из payload + ответ пользователя."""
     task = activity_payload.get("prompt") or activity_payload.get("task") or ""
+    # Данные задания (график, таблица) нужны оценщику: без них нечем проверить цифры в ответе.
+    data = activity_payload.get("data")
+    data_block = (
+        f"=== ДАННЫЕ ЗАДАНИЯ ===\n{json.dumps(data, ensure_ascii=False)}\n\n" if data else ""
+    )
     return (
         f"{rubric.prompt}\n\n"
         f"=== ЗАДАНИЕ ===\n{task}\n\n"
+        f"{data_block}"
         f"=== ОТВЕТ ПОЛЬЗОВАТЕЛЯ ===\n{answer}\n\n"
         f"Оцени строго по критериям рубрики и верни результат через инструмент."
     )

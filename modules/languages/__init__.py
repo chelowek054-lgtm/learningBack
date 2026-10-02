@@ -42,6 +42,29 @@ DEMO_ESSAY_PROMPT = (
 )
 
 
+# Задание Task 1: данные лежат в payload, клиент рисует их сам (картинка не обязательна).
+DEMO_TASK1_PAYLOAD: dict[str, Any] = {
+    "prompt": (
+        "The chart shows the percentage of households with internet access in three "
+        "countries. Summarise the information by selecting and reporting the main features, "
+        "and make comparisons where relevant."
+    ),
+    "minWords": 150,
+    "rubricId": "ielts_writing_task1",
+    "data": {
+        "kind": "bar",
+        "title": "Households with internet access (%)",
+        "unit": "%",
+        "categories": ["2010", "2015", "2020"],
+        "series": [
+            {"name": "Country A", "values": [52, 68, 85]},
+            {"name": "Country B", "values": [34, 51, 70]},
+            {"name": "Country C", "values": [71, 78, 83]},
+        ],
+    },
+}
+
+
 def is_language_subject(subject: dict[str, Any]) -> bool:
     return bool(_LANGUAGE_SUBJECT.search(f"{subject.get('id', '')} {subject.get('title', '')}"))
 
@@ -90,6 +113,22 @@ class LanguagesModule(BackendModule):
                     type=activity_type,
                     connectivity="online",
                     payload={"prompt": prompt, "rubricId": rubric_id},
+                )
+            )
+        # IELTS — ещё и описание данных (Task 1); TOEFL такого задания не имеет.
+        if not is_toefl_subject(subject) and (
+            session.query(Activity)
+            .filter_by(user_id=user_id, module=MODULE_ID, type="ielts_writing_task1")
+            .first()
+            is None
+        ):
+            session.add(
+                Activity(
+                    user_id=user_id,
+                    module=MODULE_ID,
+                    type="ielts_writing_task1",
+                    connectivity="online",
+                    payload=DEMO_TASK1_PAYLOAD,
                 )
             )
 
