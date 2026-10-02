@@ -50,6 +50,35 @@ class OwnNodeIn(BaseModel):
     content: NodeContent = Field(default_factory=NodeContent)
 
 
+class MaterialSectionIn(BaseModel):
+    heading: str = ""
+    body: str = ""
+
+
+class MaterialNodeIn(BaseModel):
+    key: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    summary: str = ""
+    sections: list[MaterialSectionIn] = Field(default_factory=list)
+    fragments: list[str] = Field(default_factory=list)
+
+
+class MaterialEdgeIn(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    from_key: str = Field(alias="from")
+    to_key: str = Field(alias="to")
+    type: str = "related"
+
+
+class MaterialAcceptIn(BaseModel):
+    """Принятое человеком предложение: он мог убрать узлы и поправить тексты."""
+
+    domain: str = Field(min_length=1)
+    nodes: list[MaterialNodeIn]
+    edges: list[MaterialEdgeIn] = Field(default_factory=list)
+
+
 class PromoteIn(BaseModel):
     user_concept_id: uuid.UUID
     tier: str = "derived"

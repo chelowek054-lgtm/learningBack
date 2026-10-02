@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, status
 
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
-from core.models import Activity
+from core.models import Activity, Material
 from modules.knowledge.ai import build_graph, expand_node
 from modules.knowledge.answer import score_answer
 from modules.knowledge.assessment import NotGroundable
@@ -23,6 +23,12 @@ from modules.knowledge.placement import (
     placement_map,
     record_answer,
 )
+from modules.knowledge.material_graph import (
+    ground,
+    material_fragments,
+    node_content,
+    propose,
+)
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
 from modules.knowledge.schemas import (
     ApproveNodeIn,
@@ -32,6 +38,7 @@ from modules.knowledge.schemas import (
     CanonNodePatch,
     CourseIn,
     CourseStepDone,
+    MaterialAcceptIn,
     ExpandIn,
     StepAnswerIn,
     OverrideIn,
@@ -527,6 +534,89 @@ def expand(body: ExpandIn, user: CurrentUser, session: SessionDep) -> dict:
             )
     session.commit()
     return effective_graph(session, user.id, c.domain)
+
+
+# ---- личные узлы из материала пользователя (T-0015) ----
+def _own_material(session, user, material_id: str) -> Material:
+    try:
+        mid = uuid.UUID(material_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "материал не найден") from None
+    m = session.get(Material, mid)
+    # Чужой личный материал неотличим от несуществующего.
+    if m is None or (m.user_id is not None and m.user_id != user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "материал не найден")
+    if not material_fragments(m):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "В материале нет фрагментов: строить узлы не из чего"
+        )
+    return m
+
+
+@router.post("/materials/{material_id}/propose")
+def propose_nodes_from_material(material_id: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Предложить узлы и связи по материалу. В граф ничего не попадает до подтверждения."""
+    return propose(_own_material(session, user, material_id))
+
+
+@router.post("/materials/{material_id}/accept", status_code=status.HTTP_201_CREATED)
+def accept_nodes_from_material(
+    material_id: str, body: MaterialAcceptIn, user: CurrentUser, session: SessionDep
+) -> dict:
+    """Принять предложение: узлы появляются в личном слое со ссылками на фрагменты."""
+    material = _own_material(session, user, material_id)
+    # Предложение вернулось от клиента: заземление проверяется заново, а не берётся на веру.
+    nodes, edges = ground(
+        {
+            "nodes": [n.model_dump() for n in body.nodes],
+            "edges": [{"from": e.from_key, "to": e.to_key, "type": e.type} for e in body.edges],
+        },
+        material_fragments(material),
+    )
+    if not nodes:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Ни один узел не опирается на фрагменты материала",
+        )
+    existing = {
+        t
+        for (t,) in session.query(UserConcept.title).filter(
+            UserConcept.user_id == user.id,
+            UserConcept.domain == body.domain,
+            UserConcept.origin == "material",
+        )
+    }
+    ids: dict[str, uuid.UUID] = {}
+    created = 0
+    for n in nodes:
+        if n["title"] in existing:
+            continue  # повторное принятие того же предложения не плодит дубли
+        uc = UserConcept(
+            user_id=user.id,
+            domain=body.domain,
+            base_concept_id=None,
+            title=n["title"],
+            content_override=coerce_content(node_content(material, n)),
+            origin="material",
+            status="learning",
+        )
+        session.add(uc)
+        session.flush()
+        ids[n["key"]] = uc.id
+        created += 1
+    for e in edges:
+        if e["from"] in ids and e["to"] in ids:
+            session.add(
+                UserEdge(
+                    user_id=user.id,
+                    domain=body.domain,
+                    from_id=ids[e["from"]],
+                    to_id=ids[e["to"]],
+                    type=e["type"],
+                )
+            )
+    session.commit()
+    return {"created": created, "graph": effective_graph(session, user.id, body.domain)}
 
 
 # ---- персональный слой (COW) ----

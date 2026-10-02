@@ -31,6 +31,9 @@ class Reference(BaseModel):
 
     title: str = ""
     url: str | None = None
+    # Заземление на материал пользователя (T-0015): откуда взят узел.
+    material_id: str | None = None
+    fragment_ids: list[str] = Field(default_factory=list)
 
 
 class NodeContent(BaseModel):
