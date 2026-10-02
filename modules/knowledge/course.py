@@ -23,7 +23,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from core.methods import CONTRAST, READ, RECALL, REMEMBER
+from core.methods import APPLY, CONTRAST, READ, RECALL, REMEMBER, preferences
+from core.models import User
 from core.modules import activity_type_for, practice_activity_type
 from modules.knowledge.assessment import BLOOM_LEVELS
 from modules.knowledge.mastery import (
@@ -46,7 +47,14 @@ _STUDY_BLOOM = "understand"
 _INTERLEAVE_EVERY = 3
 
 
-def _chain(concept: Concept, bloom: str, *, spiral: bool, has_misconception: bool) -> list[dict]:
+def _chain(
+    concept: Concept,
+    bloom: str,
+    *,
+    spiral: bool,
+    has_misconception: bool,
+    preferred: dict[str, str] | None = None,
+) -> list[dict]:
     """Цепочка шагов под узел: изучить → вспомнить → применить → удержать.
 
     Курс знает шаги, а не то, чем они исполняются: тип активности даёт включённый способ
@@ -54,24 +62,30 @@ def _chain(concept: Concept, bloom: str, *, spiral: bool, has_misconception: boo
     """
     target = BLOOM_LEVELS.index(bloom)
     steps: list[tuple[str | None, str]] = []
+    prefer = preferred or {}
 
     # На спирали теорию заново не читают — возвращаются сразу к работе с ней.
     if not spiral:
-        steps.append((activity_type_for(READ), "remember"))
-    steps.append((activity_type_for(RECALL), "understand"))
+        steps.append((activity_type_for(READ, prefer.get(READ)), "remember"))
+    steps.append((activity_type_for(RECALL, prefer.get(RECALL)), "understand"))
     if has_misconception:
         # Заблуждение чинится противопоставлением, а не повторением (§7.1).
-        steps.append((activity_type_for(CONTRAST), "understand"))
+        steps.append((activity_type_for(CONTRAST, prefer.get(CONTRAST)), "understand"))
     if target >= BLOOM_LEVELS.index("apply"):
         # Практику объявляет модуль области (у технических предметов — задача на код),
         # иначе берётся способ шага «применить».
-        steps.append((practice_activity_type(concept.domain), "apply"))
-    steps.append((activity_type_for(REMEMBER), "remember"))
+        steps.append((practice_activity_type(concept.domain, prefer.get(APPLY)), "apply"))
+    steps.append((activity_type_for(REMEMBER, prefer.get(REMEMBER)), "remember"))
     return [{"type": t, "bloom": b} for t, b in steps if t]
 
 
 def _step(
-    concept: Concept, bloom: str, reason: str, *, has_misconception: bool = False
+    concept: Concept,
+    bloom: str,
+    reason: str,
+    *,
+    has_misconception: bool = False,
+    preferred: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "conceptId": str(concept.id),
@@ -81,7 +95,11 @@ def _step(
         "bloom": bloom,
         "reason": reason,
         "activities": _chain(
-            concept, bloom, spiral=reason == SPIRAL, has_misconception=has_misconception
+            concept,
+            bloom,
+            spiral=reason == SPIRAL,
+            has_misconception=has_misconception,
+            preferred=preferred,
         ),
     }
 
@@ -123,8 +141,9 @@ def build_path(
     domain: str,
     target_bloom: str,
     interests: list[uuid.UUID] | None = None,
+    preferred: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Путь по графу от текущей границы до цели."""
+    """Путь по графу от текущей границы до цели; `preferred` — выбранные человеком способы."""
     if target_bloom not in BLOOM_LEVELS:
         raise ValueError(f"неизвестная ступень Блума: {target_bloom!r}")
 
@@ -149,6 +168,7 @@ def build_path(
                 bloom or _capped_bloom(concept, target_bloom),
                 reason,
                 has_misconception=concept.id in broken,
+                preferred=preferred,
             )
         )
         planned.add(concept.id)
@@ -193,21 +213,25 @@ def build_path(
         if reached is None or BLOOM_LEVELS.index(reached) < BLOOM_LEVELS.index(bloom):
             emit(concept, SPIRAL, bloom)
 
-    return _interleave(path)
+    return _interleave(path, (preferred or {}).get(REMEMBER))
 
 
-def _interleave(path: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Вкраплять повторение ранее пройденного узла — против зубрёжки подряд.
+def _interleave(path: list[dict[str, Any]], preferred: str | None = None) -> list[dict[str, Any]]:
+    """Вкраплять удержание ранее пройденного узла — против зубрёжки подряд.
 
-    Порядок узлов не меняется: добавляется только srs-активность на более
-    ранний узел, чтобы материал возвращался, а не оставался позади.
+    Порядок узлов не меняется: добавляется только активность шага «удержать» на более
+    ранний узел, чтобы материал возвращался, а не оставался позади. Какая именно —
+    решает выбранный способ.
     """
+    remember = activity_type_for(REMEMBER, preferred)
+    if remember is None:
+        return path
     for index, step in enumerate(path):
         if index and index % _INTERLEAVE_EVERY == 0:
             earlier = path[index - _INTERLEAVE_EVERY]
             step["activities"].append(
                 {
-                    "type": "srs",
+                    "type": remember,
                     "bloom": "remember",
                     "conceptId": earlier["conceptId"],
                     "note": "повторение ранее пройденного",
@@ -224,7 +248,9 @@ def generate_course(
     interests: list[uuid.UUID] | None = None,
 ) -> Course:
     """Построить курс и сохранить его, заменив прежний по этому домену."""
-    path = build_path(session, user_id, domain, target_bloom, interests)
+    user = session.get(User, user_id)
+    preferred = preferences(user.profile if user else None)
+    path = build_path(session, user_id, domain, target_bloom, interests, preferred)
 
     course = session.query(Course).filter_by(user_id=user_id, domain=domain).one_or_none()
     target = {"bloom": target_bloom, "concepts": [str(i) for i in (interests or [])]}

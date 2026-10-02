@@ -26,7 +26,13 @@ def _set_subject(client, user, title, sid=None):
 
 
 def test_installed_modules_are_loaded():
-    assert [m.id for m in modules.load_modules()] == ["languages", "ml", "knowledge", "srs"]
+    assert [m.id for m in modules.load_modules()] == [
+        "languages",
+        "ml",
+        "knowledge",
+        "srs",
+        "mnemonic",
+    ]
 
 
 def test_duplicate_module_is_rejected():

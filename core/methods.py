@@ -83,6 +83,18 @@ def check_methods(methods: list[StudyMethod]) -> None:
             raise MethodError("no_title", f"Способ «{m.id}» без названия")
 
 
+# Выбор человека хранится в его профиле: способ — настройка пользователя, не модуля.
+PREFERENCE_KEY = "studyMethods"
+
+
+def preferences(profile: dict | None) -> dict[str, str]:
+    """Выбранные способы по шагам изучения: {шаг: id способа}."""
+    raw = (profile or {}).get(PREFERENCE_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k in PURPOSES and isinstance(v, str)}
+
+
 def for_purpose(
     methods: list[StudyMethod], purpose: str, preferred: str | None = None
 ) -> StudyMethod | None:

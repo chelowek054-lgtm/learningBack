@@ -70,6 +70,17 @@ class BackendModule:
     def accepts_evidence(self) -> bool:
         return type(self).accept_evidence is not BackendModule.accept_evidence
 
+    def activity_payload(self, activity_type: str, node: dict[str, Any]) -> dict[str, Any] | None:
+        """Задание своего типа по узлу графа; в `node` — основа payload и содержимое узла.
+
+        None — тип не этого модуля. Так способ приносит свои задания, не требуя от модуля
+        «Модель знаний» знать, как они устроены.
+        """
+        return None
+
+    def study_methods_changed(self, session: Session, user_id: Any) -> None:
+        """Человек сменил способ: пересобрать то, что построено под прежний выбор."""
+
     def purge_data(self, session: Session) -> None:
         """Удалить ВСЕ данные модуля. Вызывается только при явном удалении модуля.
 
@@ -91,6 +102,8 @@ _PROVIDES_METHODS = {
     "admin_views": "admin_views",
     "study_methods": "study_methods",
     "evidence": "accept_evidence",
+    "activity_payload": "activity_payload",
+    "study_preferences": "study_methods_changed",
 }
 
 
@@ -230,6 +243,26 @@ def activity_type_for(purpose: str, preferred: str | None = None) -> str | None:
     """
     method = for_purpose(study_methods(), purpose, preferred)
     return method.activity_type if method else None
+
+
+def method_offline(activity_type: str) -> bool:
+    """Можно ли выполнять активность этого типа без сети — это заявляет способ."""
+    return any(m.offline for m in study_methods() if m.activity_type == activity_type)
+
+
+def payload_for(activity_type: str, node: dict[str, Any]) -> dict[str, Any] | None:
+    """Задание типа `activity_type` по узлу: его строит модуль, объявивший этот тип."""
+    for m in enabled_modules():
+        payload = m.activity_payload(activity_type, node)
+        if payload is not None:
+            return payload
+    return None
+
+
+def notify_methods_changed(session: Session, user_id: Any) -> None:
+    """Сообщить модулям, что человек сменил способ изучения."""
+    for m in enabled_modules():
+        m.study_methods_changed(session, user_id)
 
 
 # ---- жизненный цикл (C-0001, T-0051) ----

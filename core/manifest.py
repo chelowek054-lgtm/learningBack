@@ -30,6 +30,8 @@ PROVIDES = frozenset(
         "admin_views",
         "study_methods",
         "evidence",
+        "activity_payload",
+        "study_preferences",
     }
 )
 

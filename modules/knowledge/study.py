@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from core import modules
 from core.models import Activity, Response, SrsCard
 from core.srs import initial_fsrs_state
 from modules.knowledge.answer import score_answer
@@ -47,8 +48,8 @@ _ACTIVITY_KIND = {
 
 
 def _connectivity(activity_type: str) -> str:
-    """Читать теорию и повторять можно офлайн; проверка ответа требует сети."""
-    return "offline" if activity_type in ("concept_study", "srs") else "online"
+    """Офлайн ли активность, заявляет её способ; проверка ответа моделью требует сети."""
+    return "offline" if modules.method_offline(activity_type) else "online"
 
 
 def _step_of(course: Course, concept_id: str) -> dict[str, Any] | None:
@@ -66,13 +67,16 @@ def start_step(
     if concept is None:
         raise LookupError("concept не найден")
 
+    # Вкраплённое удержание указывает на ранее пройденный узел, поэтому задания
+    # ищутся и по узлу шага, и по узлам вкраплений.
+    node_ids = {concept_id} | {p["conceptId"] for p in step["activities"] if p.get("conceptId")}
     existing = {
-        a.type: a
+        (a.payload.get("conceptId"), a.type): a
         for a in session.query(Activity)
         .filter(
             Activity.user_id == user_id,
             Activity.module == MODULE_ID,
-            Activity.payload["conceptId"].astext == concept_id,
+            Activity.payload["conceptId"].astext.in_(node_ids),
         )
         .all()
     }
@@ -85,10 +89,19 @@ def start_step(
             # Повторение — не Activity, а очередь карточек (A-0016): шаг лишь
             # указывает карточку узла, см. review_card_ids.
             continue
-        if activity_type in existing:
-            created.append(existing[activity_type])
+        node_id = planned.get("conceptId") or concept_id
+        if (node_id, activity_type) in existing:
+            created.append(existing[(node_id, activity_type)])
             continue
-        payload = _payload(session, concept, content, activity_type, planned["bloom"])
+        node = concept if node_id == concept_id else session.get(Concept, node_id)
+        if node is None:
+            continue
+        node_content = (
+            content
+            if node_id == concept_id
+            else NodeContent.model_validate(coerce_content(node.content))
+        )
+        payload = _payload(session, node, node_content, activity_type, planned["bloom"])
         if payload is None:
             continue  # заданий по этому узлу не сгенерировать — активность пропускаем
         activity = Activity(
@@ -154,7 +167,8 @@ def _payload(
 
     kind = _ACTIVITY_KIND.get(activity_type)
     if kind is None:
-        return None
+        # Тип чужого способа: задание строит модуль, который его объявил.
+        return modules.payload_for(activity_type, {**base, "content": content.model_dump()})
     try:
         payload, _cached = get_or_generate(session, concept, bloom, kind)
     except (NotGroundable, ValueError):
