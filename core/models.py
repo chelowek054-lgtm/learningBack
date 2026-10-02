@@ -193,6 +193,21 @@ class Rubric(Base):
     __table_args__ = (PrimaryKeyConstraint("id", "version"),)
 
 
+class ModuleState(Base):
+    """Состояние подключённого модуля (C-0001): версия, включён ли, подключён ли в конфиге."""
+
+    __tablename__ = "module_state"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    version: Mapped[str] = mapped_column(String, nullable=False)
+    previous_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # False — модуль убран из конфигурации, но его данные остаются в БД.
+    installed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
 class ClientError(Base):
     """Необработанная ошибка клиента (T-0050): приходит с устройства, не из логов сервера."""
 

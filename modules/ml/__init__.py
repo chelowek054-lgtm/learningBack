@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from core.models import Activity
+from core.manifest import ModuleManifest
 from core.modules import BackendModule
 from modules.ml.rubrics import RUBRICS
 
@@ -29,6 +30,13 @@ def is_ml_subject(subject: dict[str, Any]) -> bool:
 
 class MlModule(BackendModule):
     id = MODULE_ID
+    manifest = ModuleManifest(
+        id=MODULE_ID,
+        title="Программирование и ML: понятия и задачи на код",
+        version="1.0",
+        provides=frozenset({"rubrics", "grade_jobs", "provision", "apply_activity"}),
+        requires=frozenset({"data.activity"}),
+    )
 
     def rubrics(self) -> list[dict[str, Any]]:
         return RUBRICS
