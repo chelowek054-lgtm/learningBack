@@ -21,6 +21,7 @@ from core.models import (
     Job,
     LlmUsage,
     Material,
+    ClientError,
     PasswordResetCode,
     Response,
     Rubric,
@@ -91,6 +92,22 @@ class PasswordResetCodeAdmin(ModelView, model=PasswordResetCode):
         PasswordResetCode.attempts,
     ]
     can_create = False
+
+
+class ClientErrorAdmin(ModelView, model=ClientError):
+    name = "Ошибка клиента"
+    name_plural = "Ошибки клиента"
+    icon = "fa-solid fa-bug"
+    category = "Ядро"
+    column_list = [
+        ClientError.created_at,
+        ClientError.app_version,
+        ClientError.fatal,
+        ClientError.message,
+    ]
+    column_default_sort = [(ClientError.created_at, True)]
+    can_create = False
+    can_edit = False
 
 
 class ActivityAdmin(ModelView, model=Activity):
@@ -187,6 +204,7 @@ class RubricAdmin(ModelView, model=Rubric):
 _CORE_VIEWS = [
     UserAdmin,
     PasswordResetCodeAdmin,
+    ClientErrorAdmin,
     ActivityAdmin,
     ResponseAdmin,
     SrsCardAdmin,

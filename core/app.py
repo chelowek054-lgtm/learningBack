@@ -13,6 +13,7 @@ from core.db import SessionLocal
 from core.usage import UserContextMiddleware
 from core.versioning import ClientVersionMiddleware, version_info
 from core.routers import auth, content, jobs, sync
+from core.routers import monitoring as monitoring_router
 from core.routers import usage as usage_router
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ _routers = [
     content.router,
     auth.router,
     usage_router.router,
+    monitoring_router.router,
     *modules.routers(),
 ]
 for _router in _routers:

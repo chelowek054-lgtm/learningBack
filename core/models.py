@@ -193,6 +193,23 @@ class Rubric(Base):
     __table_args__ = (PrimaryKeyConstraint("id", "version"),)
 
 
+class ClientError(Base):
+    """Необработанная ошибка клиента (T-0050): приходит с устройства, не из логов сервера."""
+
+    __tablename__ = "client_error"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    app_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    message: Mapped[str] = mapped_column(String, nullable=False)
+    stack: Mapped[str | None] = mapped_column(String, nullable=True)
+    fatal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    context: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_client_error_created", "created_at"),)
+
+
 class LlmUsage(Base):
     """Расход токенов на один ответ провайдера (FR-AI-05)."""
 
