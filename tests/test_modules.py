@@ -44,7 +44,7 @@ def test_grade_job_types_map_to_card_modules():
 
 
 def test_module_routers_are_mounted():
-    assert "/graph/{domain}" in app.openapi()["paths"]
+    assert "/v1/graph/{domain}" in app.openapi()["paths"]
 
 
 def test_core_does_not_know_modules():
