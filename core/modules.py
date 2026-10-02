@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.manifest import ManifestError, ModuleManifest, check_manifest, check_set
+from core.methods import APPLY, MethodError, StudyMethod, check_methods, for_purpose
 from core.models import ModuleState, Rubric
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,16 @@ class BackendModule:
         """Представления таблиц модуля для админки."""
         return []
 
+    def study_methods(self) -> list[StudyMethod]:
+        """Способы изучения, которые даёт модуль (контракт — core.methods)."""
+        return []
+
+    def accept_evidence(self, session: Session, user_id: Any, domain: str, evidence: Any) -> None:
+        """Принять свидетельство об освоении (core.evidence). Принимает тот, кто хранит освоенность."""
+
+    def accepts_evidence(self) -> bool:
+        return type(self).accept_evidence is not BackendModule.accept_evidence
+
     def purge_data(self, session: Session) -> None:
         """Удалить ВСЕ данные модуля. Вызывается только при явном удалении модуля.
 
@@ -78,6 +89,8 @@ _PROVIDES_METHODS = {
     "provision": "provision",
     "apply_activity": "apply_activity",
     "admin_views": "admin_views",
+    "study_methods": "study_methods",
+    "evidence": "accept_evidence",
 }
 
 
@@ -119,6 +132,11 @@ def validate_modules(loaded: list[BackendModule]) -> None:
                 f"реализует {', '.join(undeclared)}, но не объявил в манифесте",
             )
     check_set([m.manifest for m in loaded if m.manifest is not None])
+    # Способы разных модулей живут в одном пространстве id: «письмо» нельзя объявить дважды.
+    try:
+        check_methods([sm for m in loaded for sm in m.study_methods()])
+    except MethodError as e:
+        raise ManifestError(e.code, "study_methods", str(e)) from e
 
 
 def load_modules(paths: str | None = None) -> list[BackendModule]:
@@ -140,13 +158,13 @@ def load_modules(paths: str | None = None) -> list[BackendModule]:
     return loaded
 
 
-def practice_activity_type(domain: str, default: str = "concept_apply") -> str:
+def practice_activity_type(domain: str, default: str | None = None) -> str | None:
     """Тип практики узла: первый модуль, заявивший область, иначе `default`."""
     for m in enabled_modules():
         declared = m.apply_activity(domain)
         if declared:
             return declared
-    return default
+    return default if default is not None else activity_type_for(APPLY)
 
 
 def grade_job_modules() -> dict[str, str]:
@@ -190,6 +208,28 @@ def admin_views() -> list[Any]:
 
 def routers() -> list[APIRouter]:
     return [r for m in load_modules() if (r := m.router()) is not None]
+
+
+# ---- способы изучения (T-0053) ----
+
+
+def study_methods() -> list[StudyMethod]:
+    """Способы включённых модулей; у каждого проставлен модуль-владелец."""
+    out: list[StudyMethod] = []
+    for m in enabled_modules():
+        for sm in m.study_methods():
+            out.append(sm if sm.module else StudyMethod(**{**sm.__dict__, "module": m.id}))
+    return out
+
+
+def activity_type_for(purpose: str, preferred: str | None = None) -> str | None:
+    """Тип активности для шага изучения: способ выбирает ядро среди включённых модулей.
+
+    None — ни один включённый модуль не даёт способа для этого шага: курс его пропускает,
+    а не падает (отключили модуль повторения — шага «удержать» нет, остальное работает).
+    """
+    method = for_purpose(study_methods(), purpose, preferred)
+    return method.activity_type if method else None
 
 
 # ---- жизненный цикл (C-0001, T-0051) ----

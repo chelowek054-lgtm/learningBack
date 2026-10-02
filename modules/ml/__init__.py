@@ -8,6 +8,7 @@ from typing import Any
 
 from core.models import Activity
 from core.manifest import ModuleManifest
+from core.methods import APPLY, StudyMethod
 from core.modules import BackendModule
 from modules.ml.rubrics import RUBRICS
 
@@ -34,9 +35,17 @@ class MlModule(BackendModule):
         id=MODULE_ID,
         title="Программирование и ML: понятия и задачи на код",
         version="1.0",
-        provides=frozenset({"rubrics", "grade_jobs", "provision", "apply_activity"}),
+        provides=frozenset(
+            {"rubrics", "grade_jobs", "provision", "apply_activity", "study_methods"}
+        ),
         requires=frozenset({"data.activity"}),
     )
+
+    def study_methods(self) -> list[StudyMethod]:
+        """Задача на код с ревью по рубрике; в курс попадает через `apply_activity`."""
+        return [
+            StudyMethod("code_review", "Задача на код с ревью", APPLY, "code_task", in_course=False)
+        ]
 
     def rubrics(self) -> list[dict[str, Any]]:
         return RUBRICS

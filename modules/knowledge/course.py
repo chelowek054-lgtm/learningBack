@@ -23,7 +23,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from core.modules import practice_activity_type
+from core.methods import CONTRAST, READ, RECALL, REMEMBER
+from core.modules import activity_type_for, practice_activity_type
 from modules.knowledge.assessment import BLOOM_LEVELS
 from modules.knowledge.mastery import (
     KNOWN_THRESHOLD,
@@ -46,22 +47,27 @@ _INTERLEAVE_EVERY = 3
 
 
 def _chain(concept: Concept, bloom: str, *, spiral: bool, has_misconception: bool) -> list[dict]:
-    """Цепочка активностей под узел: изучить → вспомнить → применить → удержать."""
+    """Цепочка шагов под узел: изучить → вспомнить → применить → удержать.
+
+    Курс знает шаги, а не то, чем они исполняются: тип активности даёт включённый способ
+    (core.methods). Нет способа — шаг пропускается, курс остаётся рабочим.
+    """
     target = BLOOM_LEVELS.index(bloom)
-    chain: list[dict[str, Any]] = []
+    steps: list[tuple[str | None, str]] = []
 
     # На спирали теорию заново не читают — возвращаются сразу к работе с ней.
     if not spiral:
-        chain.append({"type": "concept_study", "bloom": "remember"})
-    chain.append({"type": "concept_recall", "bloom": "understand"})
+        steps.append((activity_type_for(READ), "remember"))
+    steps.append((activity_type_for(RECALL), "understand"))
     if has_misconception:
         # Заблуждение чинится противопоставлением, а не повторением (§7.1).
-        chain.append({"type": "concept_contrast", "bloom": "understand"})
+        steps.append((activity_type_for(CONTRAST), "understand"))
     if target >= BLOOM_LEVELS.index("apply"):
-        # Тип практики объявляет модуль области: у технических предметов это задача на код.
-        chain.append({"type": practice_activity_type(concept.domain), "bloom": "apply"})
-    chain.append({"type": "srs", "bloom": "remember"})
-    return chain
+        # Практику объявляет модуль области (у технических предметов — задача на код),
+        # иначе берётся способ шага «применить».
+        steps.append((practice_activity_type(concept.domain), "apply"))
+    steps.append((activity_type_for(REMEMBER), "remember"))
+    return [{"type": t, "bloom": b} for t, b in steps if t]
 
 
 def _step(

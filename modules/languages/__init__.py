@@ -8,6 +8,7 @@ from typing import Any
 
 from core.models import Activity, SrsCard
 from core.manifest import ModuleManifest
+from core.methods import APPLY, StudyMethod
 from core.modules import BackendModule
 from core.srs import insert_cards
 from modules.languages.generators import awl_card_partials
@@ -145,9 +146,21 @@ class LanguagesModule(BackendModule):
         id=MODULE_ID,
         title="Языки: письмо, чтение, словарь",
         version="1.0",
-        provides=frozenset({"rubrics", "grade_jobs", "provision"}),
+        provides=frozenset({"rubrics", "grade_jobs", "provision", "study_methods"}),
         requires=frozenset({"data.activity", "data.srs_card"}),
     )
+
+    def study_methods(self) -> list[StudyMethod]:
+        """Письмо с оценкой по рубрике: рубрики и оценщики лежат в модуле, не в ядре."""
+        return [
+            StudyMethod(
+                "writing",
+                "Письмо с оценкой по рубрике",
+                APPLY,
+                "ielts_writing_task2",
+                in_course=False,
+            ),
+        ]
 
     def rubrics(self) -> list[dict[str, Any]]:
         return RUBRICS
