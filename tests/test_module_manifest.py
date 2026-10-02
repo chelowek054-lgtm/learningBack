@@ -152,7 +152,7 @@ def test_module_without_manifest_cannot_be_loaded():
 def test_three_base_modules_declare_honest_manifests():
     loaded = modules.load_modules()
 
-    assert [m.id for m in loaded] == ["languages", "ml", "knowledge", "srs"]
+    assert [m.id for m in loaded] == ["languages", "ml", "knowledge", "srs", "mnemonic"]
     modules.validate_modules(loaded)  # не бросает
     for m in loaded:
         assert m.manifest.contract == CONTRACT_VERSION
@@ -177,6 +177,7 @@ def test_first_sync_installs_every_module_enabled(session):
         "ml": True,
         "knowledge": True,
         "srs": True,
+        "mnemonic": True,
     }
     assert any("установлен" in line for line in lines)
 
@@ -217,7 +218,12 @@ def test_disabling_hides_rubrics_and_keeps_data(session):
     modules.set_enabled(session, "ml", False)
 
     assert modules.is_enabled("ml") is False
-    assert [m.id for m in modules.enabled_modules()] == ["languages", "knowledge", "srs"]
+    assert [m.id for m in modules.enabled_modules()] == [
+        "languages",
+        "knowledge",
+        "srs",
+        "mnemonic",
+    ]
     assert session.query(Rubric).filter_by(module="ml").count() == count  # данные целы
     assert "grade_code" not in modules.grade_job_modules()
 

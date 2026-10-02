@@ -193,6 +193,7 @@ def test_new_method_is_added_without_touching_core_graph_or_other_methods(sessio
     assert modules.activity_type_for(REMEMBER, preferred="flash") == "flash_cards"
     # Если прежний выключен, шаг исполняется новым — без правки курса.
     modules.set_enabled(session, "srs", False)
+    modules.set_enabled(session, "mnemonic", False)
     assert types_of(session, user)[-1] == "flash_cards"
 
 

@@ -23,7 +23,9 @@ class KnowledgeModule(BackendModule):
         id=MODULE_ID,
         title="Граф знаний, курс и плейсмент",
         version="1.0",
-        provides=frozenset({"routes", "admin_views", "study_methods", "evidence"}),
+        provides=frozenset(
+            {"routes", "admin_views", "study_methods", "evidence", "study_preferences"}
+        ),
         requires=frozenset(
             {"ai.structured", "data.activity", "data.response", "data.srs_card", "data.material"}
         ),
@@ -45,6 +47,21 @@ class KnowledgeModule(BackendModule):
         from modules.knowledge import api
 
         api.record_evidence(session, user_id, domain, evidence)
+
+    def study_methods_changed(self, session, user_id) -> None:
+        """Курс собран из способов: после смены выбора пересобираем его, прогресс и освоенность целы."""
+        import uuid
+
+        from modules.knowledge.course import generate_course
+        from modules.knowledge.models import Course
+
+        for course in session.query(Course).filter_by(user_id=user_id).all():
+            target = course.target or {}
+            bloom = target.get("bloom")
+            if not bloom:
+                continue
+            interests = [uuid.UUID(i) for i in target.get("concepts") or []]
+            generate_course(session, user_id, course.domain, bloom, interests)
 
     def router(self):
         from modules.knowledge.router import router
