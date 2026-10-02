@@ -116,7 +116,9 @@ def test_provisioning_is_idempotent(client, session):
     _set_subject(client, user, "IELTS Academic")
     _set_subject(client, user, "IELTS Academic")
     assert session.query(SrsCard).filter_by(user_id=user.id, source="awl").count() == 10
-    assert session.query(Activity).filter_by(user_id=user.id).count() == 1
+    assert (
+        session.query(Activity).filter_by(user_id=user.id).count() == 2
+    )  # письмо Task 2 и описание данных Task 1
 
 
 def test_profile_without_subject_provisions_nothing(client, session):
