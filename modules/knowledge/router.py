@@ -37,7 +37,10 @@ from modules.knowledge.material_graph import (
     propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
+from modules.knowledge import subdomains
 from modules.knowledge.schemas import (
+    GoalBuildIn,
+    GoalSplitIn,
     ApproveNodeIn,
     BuildGraphIn,
     CanonEdgeIn,
@@ -83,6 +86,65 @@ def get_node(node_id: str, user: CurrentUser, session: SessionDep) -> dict:
     return resolve_node(None, uc)
 
 
+def _persist_draft(session, domain: str, draft: dict, refresh: bool) -> None:
+    """Сохранить построенный моделью граф как черновик канона (идемпотентно по ключу узла).
+
+    Общая часть `/canon/build` и построения из субдоменов: узлы создаются со
+    `status="draft"`, существующие находятся по ключу, а не по заголовку.
+    """
+    key_to_id: dict[str, object] = {}
+    for n in draft.get("nodes", []):
+        key = n.get("key") or None
+        # Узел ищем по устойчивому ключу, а не по заголовку: модель при
+        # перегенерации может переименовать узел, и поиск по заголовку заводил дубль.
+        # Заголовок — запасной путь для узлов, построенных до появления ключа.
+        existing = None
+        if key:
+            existing = session.query(Concept).filter_by(domain=domain, key=key).first()
+        if existing is None:
+            existing = (
+                session.query(Concept).filter_by(domain=domain, title=n["title"], key=None).first()
+            )
+            if existing is not None and key:
+                existing.key = key
+        if existing:
+            key_to_id[n["key"]] = existing.id
+            # Узел уже есть, но без пригодной теории — дополняем, если черновик лучше.
+            # Иначе граф, построенный до KG3-01, навсегда остаётся непригодным для
+            # генерации заданий и плейсмента.
+            fresh = coerce_content(n.get("content"))
+            stale = not NodeContent.model_validate(existing.content or {}).is_groundable()
+            if (stale or refresh) and NodeContent.model_validate(fresh).is_groundable():
+                existing.content = fresh
+                existing.version += 1  # версия растёт → кэш заданий обесценивается
+                if not existing.bloom_levels:
+                    existing.bloom_levels = n.get("bloomLevels", [])
+            continue
+        c = Concept(
+            domain=domain,
+            title=n["title"],
+            key=key,
+            tier=n.get("tier", "derived"),
+            content=coerce_content(n.get("content")),
+            bloom_levels=n.get("bloomLevels", []),
+            difficulty=n.get("difficulty", 1),
+            source="llm",
+            confidence=n.get("confidence", 0.0),
+            status="draft",
+        )
+        session.add(c)
+        session.flush()
+        key_to_id[n["key"]] = c.id
+    for e in draft.get("edges", []):
+        f, t = key_to_id.get(e["from"]), key_to_id.get(e["to"])
+        if (
+            f
+            and t
+            and not session.query(ConceptEdge).filter_by(from_id=f, to_id=t, type=e["type"]).first()
+        ):
+            session.add(ConceptEdge(from_id=f, to_id=t, type=e["type"]))
+
+
 # ---- канон-курирование: ТОЛЬКО администратор ----
 # Канон общий для всех пользователей, поэтому правит его только is_superuser.
 # Обычный пользователь работает со своим слоем (COW) — секция ниже.
@@ -105,61 +167,48 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
             "Эта область уже построена — её изменения курирует администратор",
         )
     draft = build_graph(body.domain, body.topic, body.max_nodes)
-    key_to_id: dict[str, object] = {}
-    for n in draft.get("nodes", []):
-        key = n.get("key") or None
-        # Узел ищем по устойчивому ключу, а не по заголовку: модель при
-        # перегенерации может переименовать узел, и поиск по заголовку заводил дубль.
-        # Заголовок — запасной путь для узлов, построенных до появления ключа.
-        existing = None
-        if key:
-            existing = session.query(Concept).filter_by(domain=body.domain, key=key).first()
-        if existing is None:
-            existing = (
-                session.query(Concept)
-                .filter_by(domain=body.domain, title=n["title"], key=None)
-                .first()
-            )
-            if existing is not None and key:
-                existing.key = key
-        if existing:
-            key_to_id[n["key"]] = existing.id
-            # Узел уже есть, но без пригодной теории — дополняем, если черновик лучше.
-            # Иначе граф, построенный до KG3-01, навсегда остаётся непригодным для
-            # генерации заданий и плейсмента.
-            fresh = coerce_content(n.get("content"))
-            stale = not NodeContent.model_validate(existing.content or {}).is_groundable()
-            if (stale or body.refresh) and NodeContent.model_validate(fresh).is_groundable():
-                existing.content = fresh
-                existing.version += 1  # версия растёт → кэш заданий обесценивается
-                if not existing.bloom_levels:
-                    existing.bloom_levels = n.get("bloomLevels", [])
-            continue
-        c = Concept(
-            domain=body.domain,
-            title=n["title"],
-            key=key,
-            tier=n.get("tier", "derived"),
-            content=coerce_content(n.get("content")),
-            bloom_levels=n.get("bloomLevels", []),
-            difficulty=n.get("difficulty", 1),
-            source="llm",
-            confidence=n.get("confidence", 0.0),
-            status="draft",
-        )
-        session.add(c)
-        session.flush()
-        key_to_id[n["key"]] = c.id
-    for e in draft.get("edges", []):
-        f, t = key_to_id.get(e["from"]), key_to_id.get(e["to"])
-        if (
-            f
-            and t
-            and not session.query(ConceptEdge).filter_by(from_id=f, to_id=t, type=e["type"]).first()
-        ):
-            session.add(ConceptEdge(from_id=f, to_id=t, type=e["type"]))
+    _persist_draft(session, body.domain, draft, body.refresh)
     session.commit()
     return effective_graph(session, user.id, body.domain)
+
+
+# ---- цель из субдоменов (T-0060) ----
+@router.post("/goal/split")
+def split_goal(body: GoalSplitIn, user: CurrentUser) -> dict:
+    """Разбиение цели на субдомены. Ничего не строит и не пишет: человек сперва видит и правит."""
+    split = subdomains.propose_split(body.domain, body.topic, body.max_subdomains)
+    return {"subdomains": split, "budget": subdomains.budget(split)}
+
+
+@router.post("/goal/build")
+def build_goal(body: GoalBuildIn, user: CurrentUser, session: SessionDep) -> dict:
+    """Построить граф цели: каждый субдомен — отдельным запросом, затем объединение.
+
+    Права те же, что у `/canon/build`: пустую область заводит любой, существующую
+    достраивает администратор. Узлы остаются черновиками до проверки куратором.
+    """
+    already = session.query(Concept).filter_by(domain=body.domain).first() is not None
+    if (already or body.refresh) and not user.is_superuser:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Эта область уже построена — её изменения курирует администратор",
+        )
+    # Человек мог прислать что угодно: разбиение чистится так же, как ответ модели.
+    split = subdomains.clean_split({"subdomains": [s.model_dump() for s in body.subdomains]})
+    if not split:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Нет ни одного субдомена")
+    goal = body.topic.strip() or body.domain
+    built = {s["key"]: subdomains.build_subdomain(body.domain, goal, s) for s in split}
+    draft = subdomains.assemble(split, built)
+    if not draft["nodes"]:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Модель не вернула ни одного узла")
+    _persist_draft(session, body.domain, draft, body.refresh)
+    session.commit()
+    return {
+        "graph": effective_graph(session, user.id, body.domain),
+        "budget": subdomains.budget(split),
+        "subdomains": split,
+    }
 
 
 @router.post("/canon/nodes", status_code=status.HTTP_201_CREATED)

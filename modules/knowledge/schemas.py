@@ -19,6 +19,28 @@ class BuildGraphIn(BaseModel):
     max_nodes: int = Field(default=8, ge=2, le=20)
 
 
+class SubdomainIn(BaseModel):
+    key: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    summary: str = ""
+    prereqs: list[str] = Field(default_factory=list)
+
+
+class GoalSplitIn(BaseModel):
+    domain: str = Field(min_length=1)
+    topic: str = ""
+    max_subdomains: int = Field(default=6, ge=1, le=8)
+
+
+class GoalBuildIn(BaseModel):
+    """Разбиение, которое человек увидел и, возможно, поправил: оно и есть вход построения."""
+
+    domain: str = Field(min_length=1)
+    topic: str = ""
+    subdomains: list[SubdomainIn] = Field(min_length=1)
+    refresh: bool = False
+
+
 class CanonNodeIn(BaseModel):
     domain: str
     title: str
