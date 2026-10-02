@@ -37,7 +37,8 @@ from modules.knowledge.material_graph import (
     propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
-from modules.knowledge import subdomains
+from modules.knowledge import events, subdomains
+from modules.knowledge.events import NodeChanged
 from modules.knowledge.schemas import (
     GoalBuildIn,
     GoalSplitIn,
@@ -86,13 +87,14 @@ def get_node(node_id: str, user: CurrentUser, session: SessionDep) -> dict:
     return resolve_node(None, uc)
 
 
-def _persist_draft(session, domain: str, draft: dict, refresh: bool) -> None:
+def _persist_draft(session, domain: str, draft: dict, refresh: bool) -> list[NodeChanged]:
     """Сохранить построенный моделью граф как черновик канона (идемпотентно по ключу узла).
 
     Общая часть `/canon/build` и построения из субдоменов: узлы создаются со
     `status="draft"`, существующие находятся по ключу, а не по заголовку.
     """
     key_to_id: dict[str, object] = {}
+    changed: list[NodeChanged] = []
     for n in draft.get("nodes", []):
         key = n.get("key") or None
         # Узел ищем по устойчивому ключу, а не по заголовку: модель при
@@ -117,6 +119,7 @@ def _persist_draft(session, domain: str, draft: dict, refresh: bool) -> None:
             if (stale or refresh) and NodeContent.model_validate(fresh).is_groundable():
                 existing.content = fresh
                 existing.version += 1  # версия растёт → кэш заданий обесценивается
+                changed.append(NodeChanged(existing.id, domain, existing.version))
                 if not existing.bloom_levels:
                     existing.bloom_levels = n.get("bloomLevels", [])
             continue
@@ -143,6 +146,7 @@ def _persist_draft(session, domain: str, draft: dict, refresh: bool) -> None:
             and not session.query(ConceptEdge).filter_by(from_id=f, to_id=t, type=e["type"]).first()
         ):
             session.add(ConceptEdge(from_id=f, to_id=t, type=e["type"]))
+    return changed
 
 
 # ---- канон-курирование: ТОЛЬКО администратор ----
@@ -167,8 +171,10 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
             "Эта область уже построена — её изменения курирует администратор",
         )
     draft = build_graph(body.domain, body.topic, body.max_nodes)
-    _persist_draft(session, body.domain, draft, body.refresh)
+    changed = _persist_draft(session, body.domain, draft, body.refresh)
     session.commit()
+    for ev in changed:
+        events.emit(ev)
     return effective_graph(session, user.id, body.domain)
 
 
@@ -202,8 +208,10 @@ def build_goal(body: GoalBuildIn, user: CurrentUser, session: SessionDep) -> dic
     draft = subdomains.assemble(split, built)
     if not draft["nodes"]:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Модель не вернула ни одного узла")
-    _persist_draft(session, body.domain, draft, body.refresh)
+    changed = _persist_draft(session, body.domain, draft, body.refresh)
     session.commit()
+    for ev in changed:
+        events.emit(ev)
     return {
         "graph": effective_graph(session, user.id, body.domain),
         "budget": subdomains.budget(split),
@@ -249,6 +257,7 @@ def update_canon_node(
         c.content = body.content.model_dump()
         c.version += 1  # версионирование при смене контента (инвариант №5)
     session.commit()
+    events.emit(NodeChanged(c.id, c.domain, c.version))
     return {"id": str(c.id), "version": c.version}
 
 
@@ -284,6 +293,9 @@ def promote_node(body: PromoteIn, _: CurrentSuperuser, session: SessionDep) -> d
     except NotPromotable as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     session.commit()
+    promoted = session.get(Concept, result["id"])
+    if promoted is not None:
+        events.emit(NodeChanged(promoted.id, promoted.domain, promoted.version))
     return result
 
 
@@ -759,6 +771,7 @@ def override_canon_node(
     uc.content_override = body.content.model_dump()
     uc.origin = "edited"
     session.commit()
+    events.emit(NodeChanged(base.id, base.domain, uc.version, user.id))
     return {"userConceptId": str(uc.id)}
 
 
@@ -769,6 +782,7 @@ def patch_user_node(
     uc = session.get(UserConcept, user_concept_id)
     if uc is None or uc.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user_concept не найден")
+    version_before = uc.version
     if body.title is not None and body.title != uc.title:
         uc.title = body.title
         uc.version += 1
@@ -782,6 +796,8 @@ def patch_user_node(
     if body.status is not None:
         uc.status = body.status
     session.commit()
+    if uc.version != version_before:
+        events.emit(NodeChanged(uc.id, uc.domain, uc.version, user.id))
     return {"userConceptId": str(uc.id)}
 
 

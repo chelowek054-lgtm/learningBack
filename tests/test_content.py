@@ -129,7 +129,7 @@ def test_build_fills_in_theory_for_nodes_that_lack_it(session, client):
     """Граф, построенный до KG3-01, должен дополняться, а не оставаться мёртвым."""
     stale = Concept(
         domain="ml",
-        title="Линейная алгебра",
+        title="Основные понятия",
         tier="core",
         content={"summary": "коротко"},
         bloom_levels=[],
@@ -154,7 +154,7 @@ def test_build_does_not_overwrite_usable_theory(session, client):
     """Курированный контент трогать нельзя — обновляем только непригодные узлы."""
     curated = Concept(
         domain="ml",
-        title="Линейная алгебра",
+        title="Основные понятия",
         tier="core",
         content={
             "summary": "Моя формулировка",
@@ -185,7 +185,7 @@ def test_refresh_regenerates_theory_that_already_looks_usable(session, client):
     """Явный refresh нужен, чтобы заменить заглушки настоящей теорией."""
     stub = Concept(
         domain="ml",
-        title="Линейная алгебра",
+        title="Основные понятия",
         tier="core",
         content={
             "summary": "Заглушка",
