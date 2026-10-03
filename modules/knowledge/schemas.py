@@ -157,3 +157,28 @@ class CourseStepDone(BaseModel):
 class StepAnswerIn(BaseModel):
     activity_id: uuid.UUID
     answer: Any = None
+
+
+class GoalClarifyIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class GoalAnswerIn(BaseModel):
+    question: str = ""
+    # Пустой ответ — вопрос пропущен; в пересказ он не попадает.
+    answer: str | None = None
+
+
+class GoalSummarizeIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    answers: list[GoalAnswerIn] = Field(default_factory=list, max_length=8)
+
+
+class GoalConfirmIn(BaseModel):
+    """Пересказ, который человек увидел и подтвердил (возможно, поправив)."""
+
+    domain: str = Field(min_length=1)
+    area: str = Field(min_length=1)
+    goal: str = ""
+    level: str = "apply"
+    wishes: list[str] = Field(default_factory=list, max_length=10)

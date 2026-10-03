@@ -152,3 +152,21 @@ def client(session: Session):
 
     yield _client_for
     app.dependency_overrides.clear()
+
+
+def confirm_goal(session: Session, user: User, *domains: str) -> None:
+    """Подтвердить цель по областям: без этого граф обычному пользователю не строится (T-0061)."""
+    from datetime import datetime, timezone
+
+    from modules.knowledge.models import GoalIntake
+
+    for domain in domains:
+        session.add(
+            GoalIntake(
+                user_id=user.id,
+                domain=domain,
+                summary={"area": domain, "goal": domain, "level": "apply", "wishes": []},
+                confirmed_at=datetime.now(timezone.utc),
+            )
+        )
+    session.flush()

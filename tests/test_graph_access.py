@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from modules.knowledge.models import Concept
-from tests.conftest import make_user
+from tests.conftest import confirm_goal, make_user
 
 # build здесь НЕ перечислен: пустую область заводит любой пользователь,
 # правило для него отдельное — см. тесты ниже.
@@ -77,7 +77,9 @@ def test_regular_user_builds_an_empty_domain(session, client):
     карты нет, построить некому, и «появится, как только будет готова» не
     сбывалось никогда.
     """
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, "рыбалка")
+    api = client(user)
 
     response = api.post("/graph/canon/build", json={"domain": "рыбалка", "topic": "Рыбалка"})
 
@@ -86,7 +88,9 @@ def test_regular_user_builds_an_empty_domain(session, client):
 
 def test_built_nodes_are_unmoderated(session, client):
     """Построенное пользователем — черновик: куратор ещё не смотрел."""
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, "рыбалка")
+    api = client(user)
     api.post("/graph/canon/build", json={"domain": "рыбалка", "topic": "Рыбалка"})
 
     built = session.query(Concept).filter_by(domain="рыбалка").all()

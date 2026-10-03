@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from modules.knowledge.models import Concept, ConceptEdge
-from tests.conftest import make_user
+from tests.conftest import confirm_goal, make_user
 
 SUBJECTS = [
     pytest.param("ml", id="технический"),
@@ -88,7 +88,9 @@ def _shape(session, domain):
 
 @pytest.mark.parametrize("domain", SUBJECTS)
 def test_graph_course_and_placement_work_for_any_subject(session, client, domain):
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, domain)
+    api = client(user)
 
     graph = _build(api, domain).json()
     probe = api.get(f"/graph/placement/{domain}/probe?target=understand").json()
@@ -112,7 +114,9 @@ def test_the_three_subjects_get_structurally_identical_results(session, client):
 
 
 def test_subjects_do_not_leak_into_each_other(session, client):
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, "ml", "cooking")
+    api = client(user)
     _build(api, "ml")
     _build(api, "cooking")
 
