@@ -75,6 +75,12 @@ class ModuleManifest:
     provides: frozenset[str] = field(default_factory=frozenset)
     requires: frozenset[str] = field(default_factory=frozenset)
     depends_on: tuple[str, ...] = ()
+    # Адреса, куда модуль вправе ходить: сеть закрыта по умолчанию, человек видит список при установке.
+    network: frozenset[str] = field(default_factory=frozenset)
+
+    def consent_set(self) -> frozenset[str]:
+        """Всё, на что нужно согласие: запросы к ядру и адреса сети."""
+        return self.requires | frozenset(f"net:{h}" for h in self.network)
 
     def describe(self) -> dict:
         return {
@@ -85,6 +91,7 @@ class ModuleManifest:
             "provides": sorted(self.provides),
             "requires": sorted(self.requires),
             "dependsOn": list(self.depends_on),
+            "network": sorted(self.network),
         }
 
 
@@ -147,6 +154,11 @@ def check_manifest(manifest: ModuleManifest | None, *, module_id: str = "?") -> 
             mid,
             f"просит у ядра то, чего оно не выдаёт: {', '.join(unknown_requests)}",
         )
+    bad_hosts = sorted(
+        h for h in manifest.network if not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?", h)
+    )
+    if bad_hosts:
+        raise ManifestError("bad_network", mid, f"неверный адрес сети: {', '.join(bad_hosts)}")
     if mid in manifest.depends_on:
         raise ManifestError("self_dependency", mid, "зависит сам от себя")
 

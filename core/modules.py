@@ -324,12 +324,39 @@ def sync_module_state(session: Session) -> list[str]:
         version = m.manifest.version if m.manifest else "0.0"
         row = session.get(ModuleState, m.id)
         if row is None:
-            session.add(ModuleState(id=m.id, version=version, enabled=True, installed=True))
+            consent = sorted(m.manifest.consent_set()) if m.manifest else []
+            # Модуль платформы доверен; стороннему нужно согласие на всё, что он просит.
+            trusted = bool(getattr(m, "first_party", False)) or not consent
+            session.add(
+                ModuleState(
+                    id=m.id,
+                    version=version,
+                    enabled=trusted,
+                    installed=True,
+                    approved=consent if trusted else [],
+                )
+            )
             log_lines.append(f"{m.id}: установлен, версия {version}")
+            if not trusted:
+                log_lines.append(f"{m.id}: ждёт согласия на {', '.join(consent)}")
         else:
             if row.version != version:
                 log_lines.append(f"{m.id}: обновлён {row.version} → {version}")
                 row.previous_version, row.version = row.version, version
+            consent = sorted(m.manifest.consent_set()) if m.manifest else []
+            if row.approved is None:
+                # Строки, заведённые до согласий: то, что подключено сейчас, считается согласованным.
+                row.approved = consent
+            extra = sorted(set(consent) - set(row.approved))
+            if extra:
+                if getattr(m, "first_party", False):
+                    row.approved = sorted(set(row.approved) | set(extra))
+                elif row.enabled:
+                    # Обновление расширило разрешения: до нового согласия модуль не работает.
+                    row.enabled = False
+                    log_lines.append(
+                        f"{m.id}: просит больше ({', '.join(extra)}), отключён до согласия"
+                    )
             if not row.installed:
                 row.installed = True
                 log_lines.append(f"{m.id}: подключён снова")
@@ -342,6 +369,29 @@ def sync_module_state(session: Session) -> list[str]:
     session.flush()
     _refresh_cache(session)
     return log_lines
+
+
+def pending_consent(session: Session, module_id: str) -> list[str]:
+    """На что модуль просит согласия сверх уже данного."""
+    row = session.get(ModuleState, module_id)
+    module = next((m for m in load_modules() if m.id == module_id), None)
+    if row is None or module is None or module.manifest is None:
+        return []
+    return sorted(set(module.manifest.consent_set()) - set(row.approved or []))
+
+
+def approve(session: Session, module_id: str) -> list[str]:
+    """Согласие на всё, что модуль просит сейчас, и включение. Решение человека, не модуля."""
+    module = next((m for m in load_modules() if m.id == module_id), None)
+    row = session.get(ModuleState, module_id)
+    if module is None or row is None or module.manifest is None:
+        raise LifecycleError("unknown_module", f"Модуль «{module_id}» не найден")
+    granted = pending_consent(session, module_id)
+    row.approved = sorted(module.manifest.consent_set())
+    row.enabled = True
+    session.flush()
+    _refresh_cache(session)
+    return granted
 
 
 def _manifest_of(module_id: str) -> ModuleManifest:
@@ -421,6 +471,7 @@ def module_status(session: Session) -> list[dict[str, Any]]:
                 "enabled": row.enabled if row else True,
                 "installed": row is not None and row.installed,
                 "previousVersion": row.previous_version if row else None,
+                "pendingConsent": pending_consent(session, m.id),
             }
         )
     return out

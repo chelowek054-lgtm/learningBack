@@ -204,6 +204,8 @@ class ModuleState(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     # False — модуль убран из конфигурации, но его данные остаются в БД.
     installed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # На что человек (администратор) дал согласие: запросы модуля и адреса сети. None — до появления согласий.
+    approved: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 

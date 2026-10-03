@@ -41,6 +41,17 @@ def enable_module(module_id: str, _: CurrentSuperuser, session: SessionDep) -> d
     return {"id": module_id, "enabled": True}
 
 
+@router.post("/{module_id}/approve")
+def approve_module(module_id: str, _: CurrentSuperuser, session: SessionDep) -> dict:
+    """Согласиться на запросы и сеть модуля (после установки или обновления) и включить его."""
+    try:
+        granted = modules.approve(session, module_id)
+    except modules.LifecycleError as e:
+        raise _fail(e) from e
+    session.commit()
+    return {"id": module_id, "approved": granted, "enabled": True}
+
+
 @router.post("/{module_id}/disable")
 def disable_module(module_id: str, _: CurrentSuperuser, session: SessionDep) -> dict:
     """Отключить: маршруты отвечают 503, рубрики и стартовый контент не выдаются, данные целы."""
