@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -145,3 +145,22 @@ class Course(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class GoalIntake(Base):
+    """Подтверждённый итог диалога постановки цели (T-0061, R-0033).
+
+    Хранится только пересказ «область, цель, уровень, пожелания», а не переписка:
+    она нужна лишь затем, чтобы получить итог. Пока строки нет, граф области не строится.
+    """
+
+    __tablename__ = "goal_intake"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
+    domain: Mapped[str] = mapped_column(String, nullable=False)
+    summary: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("uq_goal_intake_user_domain", "user_id", "domain", unique=True),)

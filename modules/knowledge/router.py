@@ -37,11 +37,14 @@ from modules.knowledge.material_graph import (
     propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
-from modules.knowledge import events, subdomains
+from modules.knowledge import events, goal_intake, subdomains
 from modules.knowledge.events import NodeChanged
 from modules.knowledge.schemas import (
     GoalBuildIn,
+    GoalClarifyIn,
+    GoalConfirmIn,
     GoalSplitIn,
+    GoalSummarizeIn,
     ApproveNodeIn,
     BuildGraphIn,
     CanonEdgeIn,
@@ -149,6 +152,27 @@ def _persist_draft(session, domain: str, draft: dict, refresh: bool) -> list[Nod
     return changed
 
 
+def _require_confirmed_goal(session, user, domain: str) -> None:
+    """Граф не строится, пока человек не подтвердил, что система поняла цель (R-0033).
+
+    Куратор (администратор) достраивает общий канон по своему усмотрению — для него
+    подтверждение не требуется.
+    """
+    if user.is_superuser:
+        return
+    if goal_intake.get_confirmed(session, user.id, domain) is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Сначала подтвердите цель: граф не строится, пока область не подтверждена",
+        )
+
+
+def _goal_text(session, user, domain: str, topic: str) -> str:
+    """Вход построения: подтверждённая цель, а если её нет (куратор) — переданная тема."""
+    row = goal_intake.get_confirmed(session, user.id, domain)
+    return goal_intake.as_goal_text(row.summary) if row else topic
+
+
 # ---- канон-курирование: ТОЛЬКО администратор ----
 # Канон общий для всех пользователей, поэтому правит его только is_superuser.
 # Обычный пользователь работает со своим слоем (COW) — секция ниже.
@@ -170,7 +194,9 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
             status.HTTP_403_FORBIDDEN,
             "Эта область уже построена — её изменения курирует администратор",
         )
-    draft = build_graph(body.domain, body.topic, body.max_nodes)
+    _require_confirmed_goal(session, user, body.domain)
+    goal = _goal_text(session, user, body.domain, body.topic)
+    draft = build_graph(body.domain, goal, body.max_nodes)
     changed = _persist_draft(session, body.domain, draft, body.refresh)
     session.commit()
     for ev in changed:
@@ -178,11 +204,55 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
     return effective_graph(session, user.id, body.domain)
 
 
+# ---- постановка цели как диалог (T-0061) ----
+def _intake_error(e: goal_intake.GoalIntakeError) -> HTTPException:
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e))
+
+
+@router.post("/goal/clarify")
+def clarify_goal(body: GoalClarifyIn, user: CurrentUser) -> dict:
+    """2–4 уточняющих вопроса к свободному вводу. Ничего не строит и не пишет."""
+    try:
+        return {"questions": goal_intake.propose_questions(body.text)}
+    except goal_intake.GoalIntakeError as e:
+        raise _intake_error(e) from e
+
+
+@router.post("/goal/summarize")
+def summarize_goal(body: GoalSummarizeIn, user: CurrentUser) -> dict:
+    """Пересказ «область, цель, уровень» по вводу и ответам; пропущенные вопросы не нужны."""
+    try:
+        return goal_intake.summarize(body.text, [a.model_dump() for a in body.answers])
+    except goal_intake.GoalIntakeError as e:
+        raise _intake_error(e) from e
+
+
+@router.post("/goal/confirm")
+def confirm_goal(body: GoalConfirmIn, user: CurrentUser, session: SessionDep) -> dict:
+    """Человек подтвердил пересказ: только после этого открывается построение графа."""
+    try:
+        row = goal_intake.confirm(
+            session, user.id, body.domain, body.model_dump(exclude={"domain"})
+        )
+    except goal_intake.GoalIntakeError as e:
+        raise _intake_error(e) from e
+    session.commit()
+    return goal_intake.view(row)
+
+
+@router.get("/goal/intake/{domain}")
+def goal_intake_status(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Подтверждена ли цель по области и каков итог; нужен экрану, чтобы открыть построение."""
+    return goal_intake.view(goal_intake.get_confirmed(session, user.id, domain))
+
+
 # ---- цель из субдоменов (T-0060) ----
 @router.post("/goal/split")
-def split_goal(body: GoalSplitIn, user: CurrentUser) -> dict:
+def split_goal(body: GoalSplitIn, user: CurrentUser, session: SessionDep) -> dict:
     """Разбиение цели на субдомены. Ничего не строит и не пишет: человек сперва видит и правит."""
-    split = subdomains.propose_split(body.domain, body.topic, body.max_subdomains)
+    _require_confirmed_goal(session, user, body.domain)
+    goal = _goal_text(session, user, body.domain, body.topic)
+    split = subdomains.propose_split(body.domain, goal, body.max_subdomains)
     return {"subdomains": split, "budget": subdomains.budget(split)}
 
 
@@ -199,11 +269,12 @@ def build_goal(body: GoalBuildIn, user: CurrentUser, session: SessionDep) -> dic
             status.HTTP_403_FORBIDDEN,
             "Эта область уже построена — её изменения курирует администратор",
         )
+    _require_confirmed_goal(session, user, body.domain)
     # Человек мог прислать что угодно: разбиение чистится так же, как ответ модели.
     split = subdomains.clean_split({"subdomains": [s.model_dump() for s in body.subdomains]})
     if not split:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Нет ни одного субдомена")
-    goal = body.topic.strip() or body.domain
+    goal = _goal_text(session, user, body.domain, body.topic).strip() or body.domain
     built = {s["key"]: subdomains.build_subdomain(body.domain, goal, s) for s in split}
     draft = subdomains.assemble(split, built)
     if not draft["nodes"]:
