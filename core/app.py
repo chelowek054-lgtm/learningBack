@@ -5,9 +5,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from core.admin import setup_admin
 from core import modules
+from core.ai_gateway.base import ProviderError
 from core.config import settings
 from core.db import SessionLocal
 from core.usage import UserContextMiddleware
@@ -42,6 +44,16 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Praxis API", version=settings.app_version, lifespan=lifespan)
+
+
+@app.exception_handler(ProviderError)
+async def provider_unavailable(_request, exc: ProviderError):
+    """Сбой модели у провайдера — не ошибка сервера: клиент может повторить позже."""
+    logging.getLogger(__name__).warning("Провайдер модели: %s", exc)
+    return JSONResponse(
+        status_code=502, content={"detail": "Модель сейчас недоступна, повторите позже"}
+    )
+
 
 # CORS: нужен для web-клиента (Expo web на :8081). Bearer-токен в заголовке, не cookie,
 # поэтому allow_credentials=False + wildcard допустимы.
