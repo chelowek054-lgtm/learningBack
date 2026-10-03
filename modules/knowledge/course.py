@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from core.methods import APPLY, CONTRAST, READ, RECALL, REMEMBER, preferences
 from core.models import User
 from core.modules import activity_type_for, practice_activity_type
-from modules.knowledge import cross_links, domains
+from modules.knowledge import chain_placement, cross_links, domains
 from modules.knowledge.assessment import BLOOM_LEVELS
 from modules.knowledge.mastery import (
     KNOWN_THRESHOLD,
@@ -235,7 +235,13 @@ def _foundation_steps(
     needed = cross_links.required_ancestors(session, [c.id for c in targets], target_bloom)
     if not needed:
         return []
-    found = {c.id: c for c in session.query(Concept).filter(Concept.id.in_(list(needed))).all()}
+    # Освоенное и снятое освоенным вышестоящим в путь не попадает.
+    skip = chain_placement.implied_known(session, user_id, needed)
+    found = {
+        c.id: c
+        for c in session.query(Concept).filter(Concept.id.in_(list(needed))).all()
+        if c.id not in skip
+    }
     states: dict[str, dict[uuid.UUID, MasteryState]] = {}
     chosen: list[tuple[Concept, str]] = []
     for cid, bloom in needed.items():
