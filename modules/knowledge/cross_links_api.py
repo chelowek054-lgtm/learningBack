@@ -1,0 +1,42 @@
+"""API связей между понятиями разных областей (T-0065): менять может куратор, читать — любой."""
+
+import uuid
+
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
+
+from core.deps import CurrentSuperuser, CurrentUser, SessionDep
+from modules.knowledge import cross_links
+
+router = APIRouter(tags=["cross-links"])
+
+
+class LinkIn(BaseModel):
+    from_id: uuid.UUID
+    to_id: uuid.UUID
+    bloom: str = Field(min_length=1)
+
+
+@router.post("/concept-links", status_code=status.HTTP_201_CREATED)
+def add_concept_link(body: LinkIn, _: CurrentSuperuser, session: SessionDep) -> dict:
+    """Предпосылка из другой области: понятие `from_id` нужно знать для `to_id` с ступени `bloom`."""
+    try:
+        link = cross_links.add_link(session, body.from_id, body.to_id, body.bloom)
+    except cross_links.LinkError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    session.commit()
+    return {
+        "id": str(link.id),
+        "fromId": str(link.from_id),
+        "toId": str(link.to_id),
+        "bloom": link.bloom,
+    }
+
+
+@router.get("/concept-links/{concept_id}")
+def concept_links(concept_id: uuid.UUID, _: CurrentUser, session: SessionDep) -> list[dict]:
+    """Что нужно знать из других областей, чтобы освоить понятие."""
+    return [
+        {"fromId": str(link.from_id), "bloom": link.bloom}
+        for link in cross_links.links_into(session, concept_id)
+    ]

@@ -13,6 +13,7 @@ from modules.knowledge.assessment import NotGroundable
 from modules.knowledge.assessment_store import PersonalNodeRef, get_or_generate
 from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
+from modules.knowledge.cross_links_api import router as _cross_links_router
 from modules.knowledge.domains_api import router as _domains_router
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph, resolve_node
@@ -66,6 +67,7 @@ from modules.knowledge.schemas import (
 )
 
 router = APIRouter(prefix="/graph", tags=["graph"])
+router.include_router(_cross_links_router)
 router.include_router(_domains_router)
 
 

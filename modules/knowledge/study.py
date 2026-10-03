@@ -253,7 +253,7 @@ def submit_answer(
         )
     )
 
-    state = record_answer(session, user_id, course.domain, concept.id, bloom, score)
+    state = record_answer(session, user_id, concept.domain, concept.id, bloom, score)
 
     content = NodeContent.model_validate(coerce_content(concept.content))
     if score < WEAK_SCORE:

@@ -204,3 +204,24 @@ class DomainEdge(Base):
     prereq_key: Mapped[str] = mapped_column(
         ForeignKey("domain.key", ondelete="CASCADE"), primary_key=True
     )
+
+
+class ConceptLink(Base):
+    """Предпосылка между понятиями РАЗНЫХ областей (T-0065, R-0036).
+
+    Нужно не «вся область целиком», а конкретное понятие; `bloom` — ступень освоения зависимого
+    понятия, с которой эта предпосылка обязательна (для цели «понять» она может не требоваться).
+    """
+
+    __tablename__ = "concept_link"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    from_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("concept.id"), nullable=False)
+    to_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("concept.id"), nullable=False)
+    bloom: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_concept_link_pair", "from_id", "to_id", unique=True),
+        Index("idx_concept_link_to", "to_id"),
+    )

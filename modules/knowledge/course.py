@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from core.methods import APPLY, CONTRAST, READ, RECALL, REMEMBER, preferences
 from core.models import User
 from core.modules import activity_type_for, practice_activity_type
+from modules.knowledge import cross_links, domains
 from modules.knowledge.assessment import BLOOM_LEVELS
 from modules.knowledge.mastery import (
     KNOWN_THRESHOLD,
@@ -36,6 +37,7 @@ from modules.knowledge.mastery import (
 from modules.knowledge.models import Concept, ConceptEdge, Course
 
 # Почему узел попал в путь — это объяснение курса, а не отладочная метка.
+FOUNDATION = "foundation"
 ROOTING = "rooting"
 DIFFERENTIATION = "differentiation"
 BRANCH = "branch"
@@ -89,6 +91,7 @@ def _step(
 ) -> dict[str, Any]:
     return {
         "conceptId": str(concept.id),
+        "domain": concept.domain,
         "title": concept.title,
         "tier": concept.tier,
         "centrality": concept.centrality,
@@ -213,7 +216,48 @@ def build_path(
         if reached is None or BLOOM_LEVELS.index(reached) < BLOOM_LEVELS.index(bloom):
             emit(concept, SPIRAL, bloom)
 
-    return _interleave(path, (preferred or {}).get(REMEMBER))
+    # 5. Основание: из базовых областей подтягиваются только нужные предки и только тех ступеней,
+    # которые требует цель; они идут первыми, от самой примитивной области.
+    foundation = _foundation_steps(
+        session, user_id, [concepts[i] for i in planned], target_bloom, preferred
+    )
+    return _interleave(foundation + path, (preferred or {}).get(REMEMBER))
+
+
+def _foundation_steps(
+    session: Session,
+    user_id: uuid.UUID,
+    targets: list[Concept],
+    target_bloom: str,
+    preferred: dict[str, str] | None,
+) -> list[dict[str, Any]]:
+    """Шаги по предкам из других областей: не освоенные, по порядку «примитивнее — раньше»."""
+    needed = cross_links.required_ancestors(session, [c.id for c in targets], target_bloom)
+    if not needed:
+        return []
+    found = {c.id: c for c in session.query(Concept).filter(Concept.id.in_(list(needed))).all()}
+    states: dict[str, dict[uuid.UUID, MasteryState]] = {}
+    chosen: list[tuple[Concept, str]] = []
+    for cid, bloom in needed.items():
+        concept = found.get(cid)
+        if concept is None:
+            continue
+        domain_states = states.setdefault(
+            concept.domain, load_map(session, user_id, concept.domain)
+        )
+        if domain_states.get(cid, MasteryState()).estimate >= KNOWN_THRESHOLD:
+            continue
+        chosen.append((concept, bloom))
+    level = domains.levels(session)
+
+    def order(item: tuple[Concept, str]) -> tuple:
+        concept = item[0]
+        return (level.get(domains.normalize(concept.domain), 0), -concept.centrality, concept.title)
+
+    return [
+        _step(c, _capped_bloom(c, bloom), FOUNDATION, preferred=preferred)
+        for c, bloom in sorted(chosen, key=order)
+    ]
 
 
 def _interleave(path: list[dict[str, Any]], preferred: str | None = None) -> list[dict[str, Any]]:
