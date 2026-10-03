@@ -125,9 +125,38 @@ def build_graph(domain: str, topic: str, max_nodes: int = 8) -> dict[str, Any]:
         "difficulty 1–5, confidence 0–1.\n"
         "Пиши компактно: ответ должен уместиться в лимит токенов целиком."
     )
-    g = get_ai_gateway().structured(_TOOL, _TOOL_DESC, GRAPH_IO_SCHEMA, prompt)
+    gateway = get_ai_gateway()
+    g = gateway.structured(_TOOL, _TOOL_DESC, GRAPH_IO_SCHEMA, prompt)
+    if not has_links(g) and len(g.get("nodes", [])) > MIN_NODES_FOR_LINKS:
+        # Граф без единой связи — не граф: курс вырождается в список, а плейсмент не может
+        # пропускать нижнее. Модель иногда «забывает» связи; один повторный запрос с прямым
+        # указанием обычно это лечит. Если и он без связей, берём как есть: куратор увидит.
+        retry = gateway.structured(
+            _TOOL,
+            _TOOL_DESC,
+            GRAPH_IO_SCHEMA,
+            prompt
+            + "\nВ прошлом ответе не было ни одной связи. ОБЯЗАТЕЛЬНО верни связи: у каждого "
+            "узла, кроме самых базовых, должна быть хотя бы одна предпосылка (prereq) или "
+            "родитель (specializes) среди других узлов; в from и to — key узлов из этого же ответа.",
+        )
+        if has_links(retry):
+            g = retry
     g.setdefault("domain", domain)
     return g
+
+
+# Граф из такого числа узлов и меньше может не иметь связей (набор отдельных тем).
+MIN_NODES_FOR_LINKS = 5
+
+
+def has_links(graph: dict[str, Any]) -> bool:
+    """Есть ли хотя бы одна связь между узлами этого же графа (висячие ссылки не считаются)."""
+    keys = {n.get("key") for n in graph.get("nodes", [])}
+    return any(
+        e.get("from") in keys and e.get("to") in keys and e.get("from") != e.get("to")
+        for e in graph.get("edges", [])
+    )
 
 
 def expand_node(node_title: str, direction: str) -> dict[str, Any]:
