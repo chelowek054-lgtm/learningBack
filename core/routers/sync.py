@@ -12,6 +12,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
 from core.ai_gateway import get_ai_gateway
+from core.config import settings
 from core.deps import CurrentUser, SessionDep
 from core.jobs import due_jobs, process_job
 from core.models import Activity, Job, Response, SrsCard
@@ -113,10 +114,12 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
 
     session.flush()
 
-    # Обрабатываем pending-jobs пользователя (MVP: синхронно).
-    gateway = get_ai_gateway()
-    for job in due_jobs(session, user.id):
-        process_job(session, job, gateway)
+    # Обрабатываем pending-jobs пользователя синхронно — только в режиме inline. В режиме worker
+    # задачи остаются в очереди, их берёт отдельный процесс, и /sync/push не ждёт модель.
+    if settings.jobs_mode == "inline":
+        gateway = get_ai_gateway()
+        for job in due_jobs(session, user.id):
+            process_job(session, job, gateway)
 
     session.commit()
     return SyncPushOut(ack_ids=ack)

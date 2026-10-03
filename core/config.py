@@ -122,6 +122,10 @@ class Settings(BaseSettings):
     # Повтор AI-задач при временных сбоях: сколько попыток и базовая отсрочка
     # (растёт вдвое с каждой неудачей).
     job_max_attempts: int = 3
+    # inline — задачи исполняются на /sync/push (как раньше); worker — их берёт отдельный процесс (scripts/worker.py).
+    jobs_mode: str = "inline"
+    # Через сколько минут задачу в running считаем брошенной (воркер упал) и возвращаем в очередь.
+    job_stale_minutes: int = 15
     job_retry_backoff_seconds: int = 60
 
     # Админка (sqladmin): секрет cookie-сессии. Пусто → берётся jwt_secret.
