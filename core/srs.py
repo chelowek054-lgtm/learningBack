@@ -6,7 +6,7 @@ Error-log → SRS: ошибки из скоринга становятся ка�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -68,3 +68,36 @@ def insert_cards(
             )
         )
     return len(partials)
+
+
+# ---- слияние карточки с нескольких устройств (T-0029, R-0019) ----
+
+
+def _when(value: Any) -> datetime:
+    """Время последнего ревью; карточки без ревью старше всех (минимальная дата)."""
+    if isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def review_key(state: dict[str, Any] | None) -> tuple[datetime, int, int]:
+    """Чем «свежее» состояние карточки: последнее ревью, затем число повторов и провалов.
+
+    Время записи на сервер не участвует: устройство, которое повторяло карточку вчера, но
+    синхронизировалось сегодня, не должно затирать повтор, сделанный другим устройством позже.
+    """
+    state = state or {}
+    return (
+        _when(state.get("last_review")),
+        int(state.get("reps") or 0),
+        int(state.get("lapses") or 0),
+    )
+
+
+def incoming_wins(incoming: dict[str, Any] | None, stored: dict[str, Any] | None) -> bool:
+    """Принять ли присланное состояние поверх хранимого. Равные не принимаем: повтор идемпотентен."""
+    return review_key(incoming) > review_key(stored)

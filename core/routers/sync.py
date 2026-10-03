@@ -15,6 +15,7 @@ from core.ai_gateway import get_ai_gateway
 from core.config import settings
 from core.deps import CurrentUser, SessionDep
 from core.jobs import due_jobs, process_job
+from core.srs import incoming_wins
 from core.models import Activity, Job, Response, SrsCard
 from core.schemas import (
     ActivityIO,
@@ -84,15 +85,16 @@ def push(body: SyncPushIn, user: CurrentUser, session: SessionDep) -> SyncPushOu
             obj = SrsCard(id=c.id, user_id=user.id)
             session.add(obj)
         obj.user_id = user.id
-        # LWW: более старую версию карточки не принимаем (но подтверждаем — клиенту
-        # её повторять незачем). Без времени изменения версия считается новейшей.
-        incoming = c.updated_at
-        if incoming is not None and obj.updated_at is not None and incoming < obj.updated_at:
+        # Побеждает карточка с более поздним ревью, а не с более поздней записью на сервер
+        # (R-0019): повторение на втором устройстве не откатывается синхронизацией первого.
+        # Проигравшую версию подтверждаем — клиенту её повторять незачем, а победившую он
+        # получит при следующем pull.
+        if obj.fsrs_state is not None and not incoming_wins(c.fsrs_state, obj.fsrs_state):
             ack.append(c.id)
             continue
         obj.module, obj.front, obj.back, obj.source = c.module, c.front, c.back, c.source
         obj.fsrs_state, obj.due_at = c.fsrs_state, c.due_at
-        obj.updated_at = incoming or datetime.now(timezone.utc)
+        obj.updated_at = c.updated_at or datetime.now(timezone.utc)
         ack.append(c.id)
 
     # Ставим jobs (идемпотентно по id).
