@@ -6,7 +6,7 @@ import pytest
 
 from modules.knowledge import subdomains
 from modules.knowledge.models import Concept, ConceptEdge
-from tests.conftest import make_user
+from tests.conftest import confirm_goal, make_user
 
 
 def sub(key, title=None, prereqs=()):
@@ -132,9 +132,9 @@ def test_budget_counts_one_request_per_subdomain():
 
 
 def test_split_endpoint_proposes_and_writes_nothing(session, client):
-    r = client(make_user(session)).post(
-        "/graph/goal/split", json={"domain": "d", "topic": "Алгебра"}
-    )
+    user = make_user(session)
+    confirm_goal(session, user, "d")
+    r = client(user).post("/graph/goal/split", json={"domain": "d", "topic": "Алгебра"})
 
     assert r.status_code == 200
     body = r.json()
@@ -151,7 +151,9 @@ def test_build_runs_one_request_per_subdomain_and_keeps_drafts(session, client, 
         return real(domain, goal, s)
 
     monkeypatch.setattr(subdomains, "build_subdomain", counting)
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, "d")
+    api = client(user)
     split = api.post("/graph/goal/split", json={"domain": "d", "topic": "Алгебра"}).json()
 
     r = api.post(
@@ -175,7 +177,9 @@ def test_build_runs_one_request_per_subdomain_and_keeps_drafts(session, client, 
 
 
 def test_human_edit_of_the_split_is_what_gets_built(session, client):
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, "d")
+    api = client(user)
     edited = [
         {"key": "only", "title": "Единственный субдомен", "summary": "", "prereqs": []},
     ]
@@ -187,7 +191,9 @@ def test_human_edit_of_the_split_is_what_gets_built(session, client):
 
 
 def test_build_with_cyclic_split_still_works(session, client):
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, "d")
+    api = client(user)
     cyc = [
         {"key": "a", "title": "A", "prereqs": ["b"]},
         {"key": "b", "title": "B", "prereqs": ["a"]},
@@ -224,7 +230,9 @@ def test_split_limit_is_bounded(session, client, n):
 
 
 def test_plain_canon_build_still_works_after_refactor(session, client):
-    api = client(make_user(session))
+    user = make_user(session)
+    confirm_goal(session, user, "z")
+    api = client(user)
 
     r = api.post("/graph/canon/build", json={"domain": "z", "topic": "t"})
 
