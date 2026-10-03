@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from core import modules, userdata
-from core.deps import CurrentUser, SessionDep
+from core.deps import CurrentSuperuser, CurrentUser, SessionDep
+from core.security import verify_password
 
 router = APIRouter(prefix="/me/data", tags=["my-data"])
 
@@ -22,6 +23,11 @@ class PermissionIn(BaseModel):
 
 class EraseIn(BaseModel):
     confirm: bool = False
+
+
+class DeleteAccountIn(BaseModel):
+    confirm: bool = False
+    password: str | None = None
 
 
 @router.get("/types")
@@ -69,3 +75,28 @@ def erase_data(body: EraseIn, user: CurrentUser, session: SessionDep) -> dict:
     counts = userdata.erase_all(session, user.id, _registry())
     session.commit()
     return {"erased": counts}
+
+
+@router.post("/delete-account")
+def delete_account(body: DeleteAccountIn, user: CurrentUser, session: SessionDep) -> dict:
+    """Удалить аккаунт со всеми данными. Нужны подтверждение и пароль (если он есть)."""
+    if not body.confirm:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Нужно подтверждение удаления")
+    if user.password_hash is not None and not (
+        body.password and verify_password(body.password, user.password_hash)
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный пароль")
+    result = userdata.delete_account(session, user.id, _registry())
+    session.commit()
+    return result
+
+
+retention = APIRouter(prefix="/retention", tags=["retention"])
+
+
+@retention.post("/run")
+def run_retention(_: CurrentSuperuser, session: SessionDep) -> dict:
+    """Удалить данные с истёкшим сроком хранения (то же делает scripts/purge_expired.py по расписанию)."""
+    purged = userdata.purge_expired(session, _registry())
+    session.commit()
+    return {"purged": purged}

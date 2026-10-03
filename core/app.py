@@ -72,6 +72,7 @@ _routers = [
     monitoring_router.router,
     modules_admin.router,
     userdata_router.router,
+    userdata_router.retention,
     methods_router.router,
 ]
 for _router in _routers:

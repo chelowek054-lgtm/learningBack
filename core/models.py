@@ -43,6 +43,9 @@ class User(Base):
     )
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
     profile: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # Согласие с политикой данных: какую версию принял и когда (R-0018). None — до появления согласий.
+    policy_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    policy_accepted_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
 
 
 class PasswordResetCode(Base):

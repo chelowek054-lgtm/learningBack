@@ -15,6 +15,10 @@ from pydantic.alias_generators import to_camel
 class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
+    # Согласие с политикой данных обязательно: без него аккаунт не создаётся.
+    accept_policy: bool = Field(default=False, alias="acceptPolicy")
+
+    model_config = {"populate_by_name": True}
 
 
 class LoginIn(BaseModel):

@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -57,6 +57,8 @@ class DataType:
     read: Callable[[Session, uuid.UUID], Records]
     erase: Callable[[Session, uuid.UUID], int]
     write: Callable[[Session, uuid.UUID, Records], int] | None = None
+    # Удалить записи старше границы у ВСЕХ людей (срок хранения); None — срока нет.
+    expire: Callable[[Session, datetime], int] | None = None
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -91,6 +93,7 @@ def model_type(
     retention_days: int | None,
     *,
     user_column: str = "user_id",
+    expire_where: Callable[[Any], Any] | None = None,
 ) -> DataType:
     """Тип данных, лежащий в одной таблице с колонкой владельца."""
     column = getattr(model, user_column)
@@ -103,7 +106,24 @@ def model_type(
         session.flush()
         return n
 
-    return DataType(type_id, title, owner, purpose, retention_days, read, erase)
+    def expire(session: Session, cutoff: datetime) -> int:
+        q = session.query(model).filter(model.created_at < cutoff)
+        if expire_where is not None:
+            q = q.filter(expire_where(model))
+        n = q.delete(synchronize_session=False)
+        session.flush()
+        return n
+
+    return DataType(
+        type_id,
+        title,
+        owner,
+        purpose,
+        retention_days,
+        read,
+        erase,
+        expire=expire if retention_days is not None and hasattr(model, "created_at") else None,
+    )
 
 
 def _profile_type() -> DataType:
@@ -138,7 +158,15 @@ def core_types() -> list[DataType]:
         model_type(
             SrsCard, "srs_card", "Карточки повторения", "core", "Расписание повторений", None
         ),
-        model_type(Job, "job", "Фоновые задачи", "core", "Оценка и разбор ответов", 30),
+        model_type(
+            Job,
+            "job",
+            "Фоновые задачи",
+            "core",
+            "Оценка и разбор ответов",
+            30,
+            expire_where=lambda m: m.status.in_(("done", "failed")),
+        ),
         model_type(
             Material, "material", "Загруженные материалы", "core", "Материалы человека", None
         ),
@@ -344,3 +372,56 @@ def erase_all(
     )
     session.flush()
     return counts
+
+
+# ---- сроки хранения и удаление аккаунта (T-0028, R-0018) ----
+
+
+def purge_expired(
+    session: Session, registry: dict[str, DataType], now: datetime | None = None
+) -> dict[str, int]:
+    """Удалить данные, у которых вышел срок хранения. Идемпотентно: повторный запуск ничего не найдёт."""
+    now = now or datetime.now().astimezone()
+    out: dict[str, int] = {}
+    for t in registry.values():
+        if t.retention_days is not None and t.expire is not None:
+            out[t.id] = t.expire(session, now - timedelta(days=t.retention_days))
+    return out
+
+
+def delete_account(
+    session: Session, user_id: uuid.UUID, registry: dict[str, DataType]
+) -> dict[str, Any]:
+    """Удалить аккаунт: все данные по реестру, затем любые оставшиеся строки с ссылкой на человека.
+
+    Анонимизированная статистика остаётся: строки, где ссылка на человека может быть пустой
+    (расход токенов, ошибки клиента), обезличиваются, а не удаляются; остальное стирается.
+    """
+    from sqlalchemy import update
+
+    from core.db import Base
+
+    counts = erase_all(session, user_id, registry)
+    anonymized: dict[str, int] = {}
+    deleted: dict[str, int] = {}
+    user_table = User.__table__
+    for table in Base.metadata.sorted_tables:
+        if table is user_table:
+            continue
+        for fk in table.foreign_keys:
+            if fk.column.table is not user_table:
+                continue
+            column = fk.parent
+            if column.nullable:
+                res = session.execute(
+                    update(table).where(column == user_id).values({column.name: None})
+                )
+                anonymized[table.name] = res.rowcount or 0
+            else:
+                res = session.execute(table.delete().where(column == user_id))
+                deleted[table.name] = res.rowcount or 0
+    account = session.get(User, user_id)
+    if account is not None:
+        session.delete(account)
+    session.flush()
+    return {"erased": counts, "deleted": deleted, "anonymized": anonymized}

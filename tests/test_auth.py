@@ -43,7 +43,9 @@ def anon(session):
 
 
 def _register(anon, email="a@example.com", password="secret1"):
-    return anon.post("/auth/register", json={"email": email, "password": password})
+    return anon.post(
+        "/auth/register", json={"email": email, "password": password, "acceptPolicy": True}
+    )
 
 
 def _auth(token: str) -> dict:
