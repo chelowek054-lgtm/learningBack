@@ -164,3 +164,43 @@ class GoalIntake(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (Index("uq_goal_intake_user_domain", "user_id", "domain", unique=True),)
+
+
+class Domain(Base):
+    """Область знаний в графе областей (T-0064, R-0035, A-0022).
+
+    Ключ устойчив: по нему область находят и переиспользуют, а не строят заново. Уровень
+    примитивности здесь не хранится — он вычисляется из связей (A-0022).
+    """
+
+    __tablename__ = "domain"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    # Нижняя опора: умения, ниже которых граф не спускается; предпосылок у неё нет.
+    foundation: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class DomainAlias(Base):
+    """Другое название области: «линал» и «линейная алгебра» ведут к одному ключу."""
+
+    __tablename__ = "domain_alias"
+
+    alias: Mapped[str] = mapped_column(String, primary_key=True)  # нормализованное имя
+    domain_key: Mapped[str] = mapped_column(
+        ForeignKey("domain.key", ondelete="CASCADE"), nullable=False
+    )
+
+
+class DomainEdge(Base):
+    """«Нужно знать до»: область `prereq_key` предшествует области `domain_key`."""
+
+    __tablename__ = "domain_edge"
+
+    domain_key: Mapped[str] = mapped_column(
+        ForeignKey("domain.key", ondelete="CASCADE"), primary_key=True
+    )
+    prereq_key: Mapped[str] = mapped_column(
+        ForeignKey("domain.key", ondelete="CASCADE"), primary_key=True
+    )
