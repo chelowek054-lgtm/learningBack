@@ -15,6 +15,7 @@ from core.versioning import ClientVersionMiddleware, version_info
 from core.routers import auth, content, jobs, sync
 from core.routers import methods as methods_router
 from core.routers import modules_admin
+from core.routers import userdata as userdata_router
 from core.routers import monitoring as monitoring_router
 from core.routers import usage as usage_router
 
@@ -70,6 +71,7 @@ _routers = [
     usage_router.router,
     monitoring_router.router,
     modules_admin.router,
+    userdata_router.router,
     methods_router.router,
 ]
 for _router in _routers:

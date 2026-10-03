@@ -31,6 +31,7 @@ def is_ml_subject(subject: dict[str, Any]) -> bool:
 
 class MlModule(BackendModule):
     id = MODULE_ID
+    first_party = True
     manifest = ModuleManifest(
         id=MODULE_ID,
         title="Программирование и ML: понятия и задачи на код",
