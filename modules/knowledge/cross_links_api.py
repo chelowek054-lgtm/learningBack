@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
-from modules.knowledge import chain_placement, cross_links
+from modules.knowledge import chain_placement, cross_links, path_volume
 from modules.knowledge.placement import NoProbeAvailable
 
 router = APIRouter(tags=["cross-links"])
@@ -65,3 +65,9 @@ def placement_chain_probe(
         return {"done": True, "reason": str(e), "code": e.code}
     except cross_links.LinkError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+
+
+@router.get("/goal/{domain}/volume")
+def goal_volume(domain: str, _: CurrentUser, session: SessionDep, target: str = "apply") -> dict:
+    """Сколько базовых областей и понятий лежит под целью: полный и интуитивный варианты."""
+    return path_volume.volume(session, domain, target)
