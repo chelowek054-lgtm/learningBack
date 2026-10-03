@@ -38,7 +38,17 @@ def register(body: RegisterIn, session: SessionDep) -> TokenOut:
     exists = session.query(User).filter(User.email == body.email).first()
     if exists is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email уже зарегистрирован")
-    user = User(email=body.email, password_hash=hash_password(body.password), profile={})
+    if not body.accept_policy:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Нужно согласие с политикой данных"
+        )
+    user = User(
+        email=body.email,
+        password_hash=hash_password(body.password),
+        profile={},
+        policy_version=settings.policy_version,
+        policy_accepted_at=datetime.now(timezone.utc),
+    )
     session.add(user)
     session.commit()
     session.refresh(user)
