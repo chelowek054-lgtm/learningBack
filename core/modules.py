@@ -81,6 +81,14 @@ class BackendModule:
     def study_methods_changed(self, session: Session, user_id: Any) -> None:
         """Человек сменил способ: пересобрать то, что построено под прежний выбор."""
 
+    # Модуль платформы: разрешения на объявленные данные выданы по умолчанию (человек может
+    # отозвать). Сторонний модуль начинает без разрешений.
+    first_party = False
+
+    def data_types(self) -> list[Any]:
+        """Типы данных человека, которыми владеет модуль (core.userdata.DataType)."""
+        return []
+
     def purge_data(self, session: Session) -> None:
         """Удалить ВСЕ данные модуля. Вызывается только при явном удалении модуля.
 

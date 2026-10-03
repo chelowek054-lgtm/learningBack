@@ -50,6 +50,7 @@ def mask_text(text: str) -> str:
 
 class MnemonicModule(BackendModule):
     id = MODULE_ID
+    first_party = True
     manifest = ModuleManifest(
         id=MODULE_ID,
         title="Вспомнить по первым буквам",

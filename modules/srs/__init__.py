@@ -30,6 +30,7 @@ def evidence_from_review(concept_id: uuid.UUID, rating: str, bloom: str = "remem
 
 class SrsModule(BackendModule):
     id = MODULE_ID
+    first_party = True
     manifest = ModuleManifest(
         id=MODULE_ID,
         title="Интервальное повторение",

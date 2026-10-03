@@ -47,6 +47,10 @@ REQUESTS = frozenset(
         "data.srs_card",
         "data.job",
         "data.material",
+        "data.profile",
+        "data.mastery",
+        "data.course",
+        "data.goal",
     }
 )
 

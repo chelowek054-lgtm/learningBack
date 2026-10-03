@@ -142,6 +142,7 @@ def demo_writing(subject: dict[str, Any]) -> tuple[str, str, str]:
 
 class LanguagesModule(BackendModule):
     id = MODULE_ID
+    first_party = True
     manifest = ModuleManifest(
         id=MODULE_ID,
         title="Языки: письмо, чтение, словарь",

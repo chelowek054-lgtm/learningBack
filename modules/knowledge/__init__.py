@@ -19,6 +19,7 @@ MODULE_ID = "knowledge"
 
 class KnowledgeModule(BackendModule):
     id = MODULE_ID
+    first_party = True
     manifest = ModuleManifest(
         id=MODULE_ID,
         title="Граф знаний, курс и плейсмент",
@@ -27,7 +28,16 @@ class KnowledgeModule(BackendModule):
             {"routes", "admin_views", "study_methods", "evidence", "study_preferences"}
         ),
         requires=frozenset(
-            {"ai.structured", "data.activity", "data.response", "data.srs_card", "data.material"}
+            {
+                "ai.structured",
+                "data.activity",
+                "data.response",
+                "data.srs_card",
+                "data.material",
+                "data.mastery",
+                "data.course",
+                "data.goal",
+            }
         ),
     )
 
@@ -62,6 +72,42 @@ class KnowledgeModule(BackendModule):
                 continue
             interests = [uuid.UUID(i) for i in target.get("concepts") or []]
             generate_course(session, user_id, course.domain, bloom, interests)
+
+    def data_types(self):
+        """Данные человека, которыми владеет граф знаний: освоенность, курс, подтверждённая цель."""
+        from core.userdata import DataType, model_type
+        from modules.knowledge.models import Course, GoalIntake, UserConcept, UserEdge
+
+        mastery = model_type(
+            UserConcept,
+            "mastery",
+            "Освоенность и личный граф",
+            "knowledge",
+            "Оценка освоения понятий и персональные узлы",
+            None,
+        )
+        edges = model_type(UserEdge, "_edges", "", "knowledge", "", None)
+
+        def read(session, user_id):
+            return mastery.read(session, user_id) + [
+                {"edge": r} for r in edges.read(session, user_id)
+            ]
+
+        def erase(session, user_id):
+            return edges.erase(session, user_id) + mastery.erase(session, user_id)
+
+        return [
+            DataType("mastery", mastery.title, "knowledge", mastery.purpose, None, read, erase),
+            model_type(Course, "course", "Курс", "knowledge", "Путь по графу до цели", None),
+            model_type(
+                GoalIntake,
+                "goal",
+                "Подтверждённая цель",
+                "knowledge",
+                "Итог диалога постановки цели",
+                None,
+            ),
+        ]
 
     def router(self):
         from modules.knowledge.router import router

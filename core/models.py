@@ -251,3 +251,34 @@ class LlmCache(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class DataPermission(Base):
+    """Решение человека: может ли модуль читать или писать тип данных (T-0054, R-0031)."""
+
+    __tablename__ = "data_permission"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), primary_key=True)
+    module_id: Mapped[str] = mapped_column(String, primary_key=True)
+    data_type: Mapped[str] = mapped_column(String, primary_key=True)
+    mode: Mapped[str] = mapped_column(String, primary_key=True)  # read | write
+    granted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class DataAccessLog(Base):
+    """Журнал доступа модулей к данным человека: кто, что, когда, зачем и пустили ли."""
+
+    __tablename__ = "data_access_log"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
+    module_id: Mapped[str] = mapped_column(String, nullable=False)
+    data_type: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    purpose: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
+    allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
+    at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_data_access_user_at", "user_id", "at"),)
