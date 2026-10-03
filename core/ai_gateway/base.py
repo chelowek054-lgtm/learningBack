@@ -5,6 +5,11 @@ from typing import Any, Protocol
 
 from core.models import Rubric
 
+
+class ProviderError(RuntimeError):
+    """Провайдер модели недоступен или ответил ошибкой: не вина запроса, API отвечает 502."""
+
+
 # JSON-schema результата Grade (общая для рубрик; используется как input_schema
 # инструмента submit_grade). Соответствует Grade из 02-logical §7.
 GRADE_JSON_SCHEMA: dict[str, Any] = {

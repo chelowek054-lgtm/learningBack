@@ -24,7 +24,7 @@ from typing import Any
 import httpx
 
 from core import llm_cache, usage
-from core.ai_gateway.base import render_prompt
+from core.ai_gateway.base import render_prompt, ProviderError
 from core.config import settings
 from core.models import Rubric
 
@@ -107,7 +107,7 @@ class OpenAICompatibleGateway:
             if response.status_code == 402:
                 budget = self._affordable_budget(response.text)
                 if budget is None:
-                    raise RuntimeError(f"402 (кредита не хватает): {response.text[:220]}")
+                    raise ProviderError(f"402 (кредита не хватает): {response.text[:220]}")
                 # Баланс тает по мере расходов — подстраиваем бюджет под остаток,
                 # иначе запрос отклоняется целиком, хотя денег на него хватает.
                 payload["max_tokens"] = budget
@@ -115,11 +115,11 @@ class OpenAICompatibleGateway:
                 continue
 
             if response.status_code >= 400:
-                raise RuntimeError(f"HTTP {response.status_code}: {response.text[:220]}")
+                raise ProviderError(f"HTTP {response.status_code}: {response.text[:220]}")
 
             body = response.json()
             if "error" in body:
-                raise RuntimeError(f"провайдер вернул ошибку: {str(body['error'])[:220]}")
+                raise ProviderError(f"провайдер вернул ошибку: {str(body['error'])[:220]}")
 
             # Платим за любой ответ, в том числе за тот, где модель не вызвала инструмент.
             usage.record(model=model, purpose=tool_name, usage=body.get("usage"))
@@ -137,7 +137,7 @@ class OpenAICompatibleGateway:
                 f"max_tokens={payload['max_tokens']})"
             )
 
-        raise RuntimeError(f"{model}: не удалось за {_ATTEMPTS} попытки — {last_error}")
+        raise ProviderError(f"{model}: не удалось за {_ATTEMPTS} попытки — {last_error}")
 
     @staticmethod
     def _affordable_budget(text: str) -> int | None:
@@ -153,7 +153,7 @@ class OpenAICompatibleGateway:
         try:
             parsed = json.loads(arguments)
         except json.JSONDecodeError as e:
-            raise RuntimeError(f"{model} вернул невалидный JSON в аргументах инструмента") from e
+            raise ProviderError(f"{model} вернул невалидный JSON в аргументах инструмента") from e
         return parsed if isinstance(parsed, dict) else {}
 
     def grade(
