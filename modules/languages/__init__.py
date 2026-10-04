@@ -193,7 +193,14 @@ class LanguagesModule(BackendModule):
         title="Языки: письмо, чтение, словарь",
         version="1.0",
         provides=frozenset(
-            {"rubrics", "grade_jobs", "provision", "study_methods", "apply_activity", "activity_payload"}
+            {
+                "rubrics",
+                "grade_jobs",
+                "provision",
+                "study_methods",
+                "apply_activity",
+                "activity_payload",
+            }
         ),
         requires=frozenset({"data.activity", "data.srs_card"}),
     )
