@@ -81,6 +81,9 @@ class AIGateway(Protocol):
 
 def render_prompt(rubric: Rubric, activity_payload: dict[str, Any], answer: Any) -> str:
     """Промпт = шаблон рубрики + задание из payload + ответ пользователя."""
+    # Устный ответ приходит расшифровкой с таймингами: оценщику нужен текст, а не словарь.
+    if isinstance(answer, dict) and isinstance(answer.get("asText"), str):
+        answer = answer["asText"]
     task = activity_payload.get("prompt") or activity_payload.get("task") or ""
     # Данные задания (график, таблица) нужны оценщику: без них нечем проверить цифры в ответе.
     data = activity_payload.get("data")

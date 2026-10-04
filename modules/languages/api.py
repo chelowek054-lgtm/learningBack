@@ -11,8 +11,9 @@ from core.ai_gateway.base import ProviderError
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from core.tts import get_tts
 from modules.languages import listening
+from modules.languages.speaking_api import router as speaking_router
 
-router = APIRouter(prefix="/languages/listening", tags=["languages"])
+listening_router = APIRouter(prefix="/languages/listening", tags=["languages"])
 
 
 class GenerateIn(BaseModel):
@@ -27,7 +28,7 @@ def _id(raw: str) -> uuid.UUID:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Материал не найден") from e
 
 
-@router.post("/generate", status_code=status.HTTP_201_CREATED)
+@listening_router.post("/generate", status_code=status.HTTP_201_CREATED)
 def generate(body: GenerateIn, _: CurrentSuperuser, session: SessionDep) -> dict:
     try:
         material = listening.generate(session, get_ai_gateway(), get_tts(), body.topic, body.level)
@@ -38,7 +39,7 @@ def generate(body: GenerateIn, _: CurrentSuperuser, session: SessionDep) -> dict
     return listening.describe(material, passage=True)
 
 
-@router.get("")
+@listening_router.get("")
 def list_approved(_: CurrentUser, session: SessionDep) -> list[dict]:
     """Учащимся — только подтверждённое и без текста."""
     return [
@@ -46,7 +47,7 @@ def list_approved(_: CurrentUser, session: SessionDep) -> list[dict]:
     ]
 
 
-@router.get("/drafts")
+@listening_router.get("/drafts")
 def list_drafts(_: CurrentSuperuser, session: SessionDep) -> list[dict]:
     return [
         listening.describe(m, passage=True) for m in listening.listing(session, listening.DRAFT)
@@ -60,20 +61,25 @@ def _set(session, material_id: str, new_status: str) -> dict:
     return listening.describe(m, passage=True)
 
 
-@router.post("/{material_id}/approve")
+@listening_router.post("/{material_id}/approve")
 def approve(material_id: str, _: CurrentSuperuser, session: SessionDep) -> dict:
     return _set(session, material_id, listening.APPROVED)
 
 
-@router.post("/{material_id}/reject")
+@listening_router.post("/{material_id}/reject")
 def reject(material_id: str, _: CurrentSuperuser, session: SessionDep) -> dict:
     return _set(session, material_id, listening.DRAFT)
 
 
-@router.get("/{material_id}/audio")
+@listening_router.get("/{material_id}/audio")
 def audio(material_id: str, _: CurrentUser, session: SessionDep):
     m = listening.get(session, _id(material_id))
     path = listening.audio_file(m) if m is not None else None
     if m is None or m.content.get("status") != listening.APPROVED or path is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Аудио не найдено")
     return FileResponse(path, media_type=m.content["audio"]["mime"])
+
+
+router = APIRouter()
+router.include_router(listening_router)
+router.include_router(speaking_router)

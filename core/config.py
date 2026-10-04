@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     tts_voice: str = "alloy"
     audio_dir: str = ".data/audio"
 
+    # Расшифровка речи (порт core.stt). Пустая модель → заглушка. Записи голоса — в voice_dir.
+    stt_model: str = ""
+    voice_dir: str = ".data/voice"
+    max_voice_bytes: int = 10 * 1024 * 1024
+
     # Подключённые предметные модули (ADR-0019). Ядро про них ничего не знает:
     # каждый пункт — пакет с объектом `backend` (наследник core.modules.BackendModule).
     installed_modules: str = (

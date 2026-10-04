@@ -103,7 +103,37 @@ TOEFL_WRITING_INTEGRATED = {
     },
 }
 
+IELTS_SPEAKING = {
+    "id": "ielts_speaking",
+    "version": 1,
+    "module": "languages",
+    "model": "",
+    "prompt": (
+        "Ты — экзаменатор IELTS Speaking. Тебе дана расшифровка устного ответа и тайминги слов "
+        "(темп, паузы); звука у тебя нет. Оцени по band descriptors (0–9) по четырём критериям: "
+        "Fluency and Coherence (темп, паузы, самоисправления, связность), Lexical Resource, "
+        "Grammatical Range and Accuracy, Pronunciation. Pronunciation по тексту оценить нельзя: "
+        "поставь осторожный балл по косвенным признакам и прямо напиши в комментарии, что "
+        "оценка приблизительна. Итоговый overall — среднее, округлённое до 0.5. Выпиши ключевые "
+        "ошибки речи (грамматика, лексика) с корректировкой и объяснением."
+    ),
+    "schema": {
+        "criteria": [
+            {"name": "Fluency and Coherence", "max": 9},
+            {"name": "Lexical Resource", "max": 9},
+            {"name": "Grammatical Range and Accuracy", "max": 9},
+            {"name": "Pronunciation", "max": 9},
+        ],
+        "caveat": (
+            "Оценка по тексту и таймингам: произношение по расшифровке не проверить, "
+            "балл Pronunciation приблизительный."
+        ),
+        "grade_schema": GRADE_JSON_SCHEMA,
+    },
+}
+
 RUBRICS = [
+    IELTS_SPEAKING,
     IELTS_WRITING_TASK2,
     IELTS_WRITING_TASK1,
     TOEFL_WRITING_INDEPENDENT,
