@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from core.ai_gateway import AIGateway, get_rubric
 from core.config import settings
 from core.models import Activity, Job, Response
-from core.modules import grade_job_modules
+from core.modules import grade_job_modules, job_handler_for
 from core.srs import errors_to_card_partials, insert_cards
 
 
@@ -41,6 +41,13 @@ def process_job(session: Session, job: Job, gateway: AIGateway) -> None:
     job.attempts += 1
 
     try:
+        handler = job_handler_for(job.type)
+        if handler is not None:
+            # Фоновая работа модуля без рубрики: результат — то, что вернул обработчик.
+            job.result = handler(session, job, gateway)
+            job.retry_after = None
+            job.status = "done"
+            return
         card_modules = grade_job_modules()
         if job.type not in card_modules:
             raise ValueError(f"Неизвестный тип job: {job.type}")

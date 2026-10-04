@@ -25,6 +25,7 @@ PROVIDES = frozenset(
         "routes",
         "rubrics",
         "grade_jobs",
+        "job_handlers",
         "provision",
         "apply_activity",
         "admin_views",

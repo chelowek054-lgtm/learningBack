@@ -11,6 +11,7 @@ from core.manifest import ModuleManifest
 from core.methods import APPLY, StudyMethod
 from core.modules import BackendModule
 from core.srs import insert_cards
+from modules.languages.distractors import JOB_TYPE as EXPLAIN_JOB, explain_distractors
 from modules.languages.generators import awl_card_partials
 from modules.languages.rubrics import RUBRICS
 
@@ -196,6 +197,7 @@ class LanguagesModule(BackendModule):
             {
                 "rubrics",
                 "grade_jobs",
+                "job_handlers",
                 "provision",
                 "study_methods",
                 "apply_activity",
@@ -239,6 +241,9 @@ class LanguagesModule(BackendModule):
 
     def grade_jobs(self) -> dict[str, str]:
         return {"grade_writing": MODULE_ID}
+
+    def job_handlers(self) -> dict[str, Any]:
+        return {EXPLAIN_JOB: explain_distractors}
 
     def provision(self, session, user_id, subject, now: datetime) -> None:
         """Колода AWL и пробное эссе — только тому, кто учит язык (FR-SRS-05)."""
