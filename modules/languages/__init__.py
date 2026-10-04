@@ -140,6 +140,51 @@ def demo_writing(subject: dict[str, Any]) -> tuple[str, str, str]:
     return "ielts_writing_task2", "ielts_writing_task2", DEMO_ESSAY_PROMPT
 
 
+_GAP_MIN_LEN = 5
+_MAX_GAPS = 3
+
+
+def reading_payload(node: dict[str, Any]) -> dict[str, Any] | None:
+    """Дрилл чтения из теории узла: текст — его формулировка и разделы, вопросы — пропуски.
+
+    Без сети и модели: пропуск делается по самому длинному слову предложения, ответ берётся
+    из текста, поэтому проверка локальная. Нет формулировки — дрилла нет (шаг пропускается).
+    """
+    content = node.get("content") or {}
+    summary = (content.get("summary") or "").strip()
+    if not summary:
+        return None
+    sections = [s.get("body", "").strip() for s in content.get("sections") or []]
+    passage = "\n\n".join(p for p in [summary, *sections] if p)
+    questions: list[dict[str, Any]] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", summary):
+        words = [w for w in re.findall(r"[^\W\d_]+", sentence) if len(w) >= _GAP_MIN_LEN]
+        if not words:
+            continue
+        target = max(words, key=len)
+        questions.append(
+            {
+                "id": f"q{len(questions) + 1}",
+                "type": "gap",
+                "prompt": sentence.replace(target, "____", 1),
+                "answer": [target],
+                "explanation": f"В тексте: «{sentence}»",
+            }
+        )
+        if len(questions) == _MAX_GAPS:
+            break
+    if not questions:
+        return None
+    base = {k: v for k, v in node.items() if k != "content"}
+    return {
+        **base,
+        "title": node.get("title") or "Reading",
+        "timeLimitSec": 300,
+        "passage": passage,
+        "questions": questions,
+    }
+
+
 class LanguagesModule(BackendModule):
     id = MODULE_ID
     first_party = True
@@ -147,7 +192,16 @@ class LanguagesModule(BackendModule):
         id=MODULE_ID,
         title="Языки: письмо, чтение, словарь",
         version="1.0",
-        provides=frozenset({"rubrics", "grade_jobs", "provision", "study_methods"}),
+        provides=frozenset(
+            {
+                "rubrics",
+                "grade_jobs",
+                "provision",
+                "study_methods",
+                "apply_activity",
+                "activity_payload",
+            }
+        ),
         requires=frozenset({"data.activity", "data.srs_card"}),
     )
 
@@ -161,7 +215,24 @@ class LanguagesModule(BackendModule):
                 "ielts_writing_task2",
                 in_course=False,
             ),
+            StudyMethod(
+                "reading_drill",
+                "Чтение с вопросами",
+                APPLY,
+                "reading_drill",
+                offline=True,
+                in_course=False,
+            ),
         ]
+
+    def apply_activity(self, domain: str) -> str | None:
+        """Практика языкового предмета — дрилл чтения по теории узла (T-0020, R-0013)."""
+        return "reading_drill" if is_language_subject({"id": domain, "title": domain}) else None
+
+    def activity_payload(self, activity_type: str, node: dict[str, Any]) -> dict[str, Any] | None:
+        if activity_type != "reading_drill":
+            return None
+        return reading_payload(node)
 
     def rubrics(self) -> list[dict[str, Any]]:
         return RUBRICS
