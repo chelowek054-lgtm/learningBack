@@ -154,3 +154,17 @@ def test_upload_stores_the_file_for_the_owner_and_rejects_empty(session, client)
         == 422
     )
     assert uuid.UUID(r.json()["audioId"])
+
+
+def test_language_subject_gets_a_speaking_task_once(session):
+    from modules.languages import backend
+
+    user = make_user(session)
+    for _ in range(2):
+        backend.provision(
+            session, user.id, {"id": "english", "title": "English B2"}, datetime.now(timezone.utc)
+        )
+        session.flush()
+    rows = session.query(Activity).filter_by(user_id=user.id, type="speaking_response").all()
+    assert len(rows) == 1 and rows[0].payload["rubricId"] == "ielts_speaking"
+    assert rows[0].connectivity == "offline"
