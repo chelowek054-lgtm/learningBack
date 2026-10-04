@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     llm_site_url: str = ""
     llm_site_title: str = "Praxis"
 
+    # Озвучка материалов (порт core.tts). Пустая модель → заглушка; файлы лежат в audio_dir.
+    tts_model: str = ""
+    tts_voice: str = "alloy"
+    audio_dir: str = ".data/audio"
+
     # Подключённые предметные модули (ADR-0019). Ядро про них ничего не знает:
     # каждый пункт — пакет с объектом `backend` (наследник core.modules.BackendModule).
     installed_modules: str = (

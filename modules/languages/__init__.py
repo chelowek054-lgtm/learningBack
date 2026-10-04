@@ -195,6 +195,7 @@ class LanguagesModule(BackendModule):
         version="1.0",
         provides=frozenset(
             {
+                "routes",
                 "rubrics",
                 "grade_jobs",
                 "job_handlers",
@@ -235,6 +236,11 @@ class LanguagesModule(BackendModule):
         if activity_type != "reading_drill":
             return None
         return reading_payload(node)
+
+    def router(self):
+        from modules.languages.api import router
+
+        return router
 
     def rubrics(self) -> list[dict[str, Any]]:
         return RUBRICS
