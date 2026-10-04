@@ -43,6 +43,14 @@ class BackendModule:
         """Типы jobs, оцениваемые по рубрике → модуль карточек для error-log."""
         return {}
 
+    def job_handlers(self) -> dict[str, Any]:
+        """Типы jobs без рубрики → обработчик `(session, job, gateway) -> dict` (результат job).
+
+        Так модуль приносит фоновую работу (например, разбор дистракторов), не требуя от ядра
+        знать её устройство. Тип, объявленный дважды, запрещён.
+        """
+        return {}
+
     def provision(
         self, session: Session, user_id: Any, subject: dict[str, Any], now: datetime
     ) -> None:
@@ -105,6 +113,7 @@ _PROVIDES_METHODS = {
     "routes": "router",
     "rubrics": "rubrics",
     "grade_jobs": "grade_jobs",
+    "job_handlers": "job_handlers",
     "provision": "provision",
     "apply_activity": "apply_activity",
     "admin_views": "admin_views",
@@ -186,6 +195,14 @@ def practice_activity_type(domain: str, default: str | None = None) -> str | Non
         if declared:
             return declared
     return default if default is not None else activity_type_for(APPLY)
+
+
+def job_handler_for(job_type: str) -> Any | None:
+    """Обработчик jobs этого типа среди включённых модулей; None — тип не объявлен."""
+    found = [m.job_handlers()[job_type] for m in enabled_modules() if job_type in m.job_handlers()]
+    if len(found) > 1:
+        raise ValueError(f"Тип job объявлен дважды: {job_type}")
+    return found[0] if found else None
 
 
 def grade_job_modules() -> dict[str, str]:
