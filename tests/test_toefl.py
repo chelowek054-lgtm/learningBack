@@ -58,7 +58,12 @@ def test_ielts_subject_still_gets_ielts_writing(session):
 
     provision_subject(session, user.id, {"id": "ielts", "title": "IELTS"}, NOW)
 
-    assert _types(session, user) == {"ielts_writing_task2", "ielts_writing_task1", "reading_drill"}
+    assert _types(session, user) == {
+        "ielts_writing_task2",
+        "ielts_writing_task1",
+        "reading_drill",
+        "speaking_response",
+    }
 
 
 def test_provisioning_twice_does_not_duplicate(session):

@@ -100,6 +100,16 @@ DEMO_READING_PAYLOAD: dict[str, Any] = {
 }
 
 
+DEMO_SPEAKING_PAYLOAD: dict[str, Any] = {
+    "prompt": (
+        "Describe the town or city where you live. What do you like about it, "
+        "and what would you change?"
+    ),
+    "maxSec": 120,
+    "rubricId": "ielts_speaking",
+}
+
+
 # Задание Task 1: данные лежат в payload, клиент рисует их сам (картинка не обязательна).
 DEMO_TASK1_PAYLOAD: dict[str, Any] = {
     "prompt": (
@@ -288,6 +298,22 @@ class LanguagesModule(BackendModule):
                     type="reading_drill",
                     connectivity="offline",
                     payload=DEMO_READING_PAYLOAD,
+                )
+            )
+        # Устный ответ (рубрика IELTS; у TOEFL свой формат речи — отдельная задача).
+        if not is_toefl_subject(subject) and (
+            session.query(Activity)
+            .filter_by(user_id=user_id, module=MODULE_ID, type="speaking_response")
+            .first()
+            is None
+        ):
+            session.add(
+                Activity(
+                    user_id=user_id,
+                    module=MODULE_ID,
+                    type="speaking_response",
+                    connectivity="offline",
+                    payload=DEMO_SPEAKING_PAYLOAD,
                 )
             )
         # Подтверждённые куратором материалы аудирования (T-0039) → задания (T-0037).
