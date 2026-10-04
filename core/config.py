@@ -104,6 +104,16 @@ class Settings(BaseSettings):
 
     # Расшифровка речи (порт core.stt). Пустая модель → заглушка. Записи голоса — в voice_dir.
     stt_model: str = ""
+
+    # Почта (core.mail): любой SMTP. Пусто → письма только в лог (вне production).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+
+    stt_model: str = ""
     voice_dir: str = ".data/voice"
     max_voice_bytes: int = 10 * 1024 * 1024
 

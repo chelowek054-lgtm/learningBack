@@ -4,10 +4,11 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 
 from core.config import settings
 from core.deps import CurrentUser, SessionDep
+from core.mail import reset_code_message, send_safely
 from core.models import PasswordResetCode, User
 from core.schemas import (
     LoginIn,
@@ -69,12 +70,15 @@ def login(body: LoginIn, session: SessionDep) -> TokenOut:
 
 @router.post("/password-reset/request", status_code=status.HTTP_202_ACCEPTED)
 def password_reset_request(
-    body: PasswordResetRequestIn, session: SessionDep, request: Request
+    body: PasswordResetRequestIn,
+    session: SessionDep,
+    request: Request,
+    background: BackgroundTasks,
 ) -> dict:
     """Выпустить временный код восстановления.
 
-    В БД остаётся только хеш кода. Доставки (почта/SMS) ещё нет, поэтому вне
-    production код пишется в лог сервера — иначе его негде взять. Ответ одинаков
+    В БД остаётся только хеш кода; сам код уходит письмом (core.mail), без SMTP —
+    в лог сервера вне production. Ответ одинаков
     независимо от существования email, чтобы не давать перебирать адреса; лимит
     частоты считается по email и IP до обращения к БД, по той же причине.
     """
@@ -102,8 +106,9 @@ def password_reset_request(
             )
         )
         session.commit()
-        if not settings.is_deployed:
-            log.warning("Код восстановления для %s: %s (доставки пока нет)", user.email, code)
+        # В фоне: время ответа не должно выдавать, есть ли такой email и ушло ли письмо.
+        subject, text = reset_code_message(code, settings.password_reset_code_ttl_minutes)
+        background.add_task(send_safely, user.email, subject, text)
     return {"status": "accepted", "ttl_minutes": settings.password_reset_code_ttl_minutes}
 
 
