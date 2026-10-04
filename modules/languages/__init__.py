@@ -289,6 +289,33 @@ class LanguagesModule(BackendModule):
                     payload=DEMO_READING_PAYLOAD,
                 )
             )
+        # Подтверждённые куратором материалы аудирования (T-0039) → задания (T-0037).
+        from modules.languages import listening
+
+        have = {
+            a.payload.get("materialId")
+            for a in session.query(Activity).filter_by(
+                user_id=user_id, module=MODULE_ID, type="listening_drill"
+            )
+        }
+        for m in listening.listing(session, listening.APPROVED):
+            if str(m.id) in have:
+                continue
+            session.add(
+                Activity(
+                    user_id=user_id,
+                    module=MODULE_ID,
+                    type="listening_drill",
+                    connectivity="offline",
+                    payload={
+                        "materialId": str(m.id),
+                        "title": m.title,
+                        "audioPath": f"/languages/listening/{m.id}/audio",
+                        "maxPlays": 1,
+                        "questions": m.content["questions"],
+                    },
+                )
+            )
         # IELTS — ещё и описание данных (Task 1); TOEFL такого задания не имеет.
         if not is_toefl_subject(subject) and (
             session.query(Activity)

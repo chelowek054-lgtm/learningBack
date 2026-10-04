@@ -140,3 +140,25 @@ def test_model_failure_is_422_and_provider_error_502(session, client, monkeypatc
     assert (
         admin.post("/languages/listening/generate", json={"topic": "commuting"}).status_code == 502
     )
+
+
+def test_approved_materials_become_listening_activities_without_the_text(session):
+    from datetime import datetime, timezone
+
+    from core.models import Activity
+    from modules.languages import backend
+
+    approved = listening.generate(session, Gateway(good()), MockTTS(), "commuting")
+    listening.set_status(session, approved.id, "approved")
+    listening.generate(session, Gateway(good(title="Draft")), MockTTS(), "other")  # черновик
+
+    user = make_user(session)
+    now = datetime.now(timezone.utc)
+    for _ in range(2):  # повторная выдача не плодит дубли
+        backend.provision(session, user.id, {"id": "english", "title": "English B2"}, now)
+        session.flush()
+    rows = session.query(Activity).filter_by(user_id=user.id, type="listening_drill").all()
+    assert len(rows) == 1
+    payload = rows[0].payload
+    assert payload["materialId"] == str(approved.id) and payload["maxPlays"] == 1
+    assert "passage" not in payload and rows[0].connectivity == "offline"
