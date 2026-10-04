@@ -96,7 +96,7 @@ def test_sync_rubrics_never_overwrites_existing_version(session):
 def test_language_subject_gets_awl_and_essay(client, session):
     user = make_user(session)
     _set_subject(client, user, "IELTS Academic")
-    assert session.query(SrsCard).filter_by(user_id=user.id, source="awl").count() == 10
+    assert session.query(SrsCard).filter_by(user_id=user.id, source="awl").count() == 570
     essay = session.query(Activity).filter_by(user_id=user.id, type="ielts_writing_task2")
     assert essay.count() == 1
     # ML-контент языковому предмету не нужен.
@@ -122,7 +122,7 @@ def test_provisioning_is_idempotent(client, session):
     user = make_user(session)
     _set_subject(client, user, "IELTS Academic")
     _set_subject(client, user, "IELTS Academic")
-    assert session.query(SrsCard).filter_by(user_id=user.id, source="awl").count() == 10
+    assert session.query(SrsCard).filter_by(user_id=user.id, source="awl").count() == 570
     assert (
         session.query(Activity).filter_by(user_id=user.id).count() == 4
     )  # письмо Task 2 и Task 1, чтение, устный ответ

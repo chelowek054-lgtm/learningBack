@@ -6,7 +6,7 @@ Error-log → SRS: ошибки из скоринга становятся ка�
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -55,6 +55,8 @@ def insert_cards(
 ) -> int:
     """Вставить карточки из заготовок; проставить fsrs_state и due_at. Вернуть кол-во."""
     for p in partials:
+        # `due_in_days` откладывает первое повторение: большая колода не должна стать долгом в день 1.
+        due = now + timedelta(days=p.get("due_in_days", 0))
         session.add(
             SrsCard(
                 user_id=user_id,
@@ -63,8 +65,8 @@ def insert_cards(
                 back=p["back"],
                 source=p["source"],
                 concept_id=p.get("concept_id"),
-                fsrs_state=initial_fsrs_state(now),
-                due_at=now,
+                fsrs_state=initial_fsrs_state(due),
+                due_at=due,
             )
         )
     return len(partials)
