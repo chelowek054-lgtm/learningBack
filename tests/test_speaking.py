@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import pytest
 
 from core import modules
-from core.ai_gateway.mock import MockAIGateway
+from core.ai_mock import MockAIGateway
 from core.config import settings
 from core.jobs import process_job
 from core.models import Activity, Job, Response, SrsCard

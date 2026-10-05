@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from core.app import app
+from api.app import app
 from core.config import settings
 from core.versioning import is_outdated, parse_version
 

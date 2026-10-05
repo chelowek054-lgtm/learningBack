@@ -6,9 +6,9 @@
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from core.ai_gateway.base import AIGateway, render_prompt
-from core.ai_gateway.mock import MockAIGateway
-from core.ai_gateway.openai_compatible import OpenAICompatibleGateway
+from core.ai_base import AIGateway, render_prompt
+from core.ai_mock import MockAIGateway
+from core.ai_openai import OpenAICompatibleGateway
 from core.config import settings
 from core.models import Rubric
 

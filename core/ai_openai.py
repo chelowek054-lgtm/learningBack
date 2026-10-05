@@ -24,7 +24,7 @@ from typing import Any
 import httpx
 
 from core import llm_cache, usage
-from core.ai_gateway.base import render_prompt, ProviderError
+from core.ai_base import render_prompt, ProviderError
 from core.config import settings
 from core.models import Rubric
 

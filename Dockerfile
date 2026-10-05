@@ -20,4 +20,4 @@ RUN uv sync --no-dev --frozen
 COPY . .
 
 EXPOSE 8000
-CMD ["uv", "run", "--no-dev", "uvicorn", "core.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "--no-dev", "uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000"]

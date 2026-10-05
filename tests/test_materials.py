@@ -188,7 +188,7 @@ def test_upload_pdf_and_custom_title(session, client):
 
 
 def test_oversized_file_is_rejected(session, client, monkeypatch):
-    monkeypatch.setattr("core.routers.content.MAX_UPLOAD_BYTES", 100)
+    monkeypatch.setattr("api.routers.content.MAX_UPLOAD_BYTES", 100)
 
     r = _upload(client(make_user(session)), "big.md", b"x" * 101)
 
@@ -196,7 +196,7 @@ def test_oversized_file_is_rejected(session, client, monkeypatch):
 
 
 def test_file_at_the_limit_is_accepted(session, client, monkeypatch):
-    monkeypatch.setattr("core.routers.content.MAX_UPLOAD_BYTES", 100)
+    monkeypatch.setattr("api.routers.content.MAX_UPLOAD_BYTES", 100)
 
     assert _upload(client(make_user(session)), "ok.md", b"x" * 100).status_code == 201
 
@@ -261,7 +261,7 @@ def test_shared_material_is_visible_but_not_deletable(session, client):
 def test_upload_requires_login(session):
     from fastapi.testclient import TestClient
 
-    from core.app import app
+    from api.app import app
 
     r = TestClient(app).post("/content/materials", files={"file": ("a.md", b"x")})
     assert r.status_code in (401, 403)

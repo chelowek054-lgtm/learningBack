@@ -1,6 +1,6 @@
 """Рубрики модуля «Языки». WS4."""
 
-from core.ai_gateway.base import GRADE_JSON_SCHEMA
+from core.ai_base import GRADE_JSON_SCHEMA
 
 IELTS_WRITING_TASK2 = {
     "id": "ielts_writing_task2",

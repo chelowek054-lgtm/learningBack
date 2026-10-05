@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from core.app import app
+from api.app import app
 from core.config import settings
 from core.db import get_session
 from core.models import PasswordResetCode, SrsCard, User
@@ -30,7 +30,7 @@ def issued_codes(monkeypatch):
         issued.append(f"{10000000 + len(issued) + 1}")
         return issued[-1]
 
-    monkeypatch.setattr("core.routers.auth.generate_reset_code", fake)
+    monkeypatch.setattr("api.routers.auth.generate_reset_code", fake)
     yield issued
     reset_request_limiter.reset()
 

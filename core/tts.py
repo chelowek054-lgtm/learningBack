@@ -13,7 +13,7 @@ from typing import Protocol
 
 import httpx
 
-from core.ai_gateway.base import ProviderError
+from core.ai_base import ProviderError
 from core.config import settings
 
 

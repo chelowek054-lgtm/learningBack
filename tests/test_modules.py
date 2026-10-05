@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core import modules
-from core.app import app
+from api.app import app
 from core.db import get_session
 from core.models import Activity, Rubric, SrsCard
 from tests.conftest import make_user
@@ -140,7 +140,7 @@ def test_lifespan_survives_without_database(monkeypatch):
     def boom():
         raise RuntimeError("db down")
 
-    monkeypatch.setattr("core.app.SessionLocal", boom)
+    monkeypatch.setattr("api.app.SessionLocal", boom)
     app.dependency_overrides[get_session] = lambda: None
     try:
         with TestClient(app) as c:

@@ -37,7 +37,7 @@ uv sync
 # нужен доступный Postgres — поднять только его из корня: (cd .. && docker compose up -d postgres)
 uv run alembic upgrade head
 uv run python -m scripts.seed
-uv run uvicorn core.app:app --reload
+uv run uvicorn api.app:app --reload
 ```
 
 ## Миграции
