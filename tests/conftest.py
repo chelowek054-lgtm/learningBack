@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from core.app import app
+from api.app import app
 from core.config import settings
 from core.db import Base, get_session
 from core.deps import get_current_user

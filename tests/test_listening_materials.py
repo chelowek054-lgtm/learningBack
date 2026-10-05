@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core import ai_gateway
+from core.ai_base import ProviderError
 from core.config import settings
 from core.tts import MockTTS
 from modules.languages import api, listening
@@ -134,7 +134,7 @@ def test_model_failure_is_422_and_provider_error_502(session, client, monkeypatc
 
     class Down:
         def structured(self, *a, **k):
-            raise ai_gateway.base.ProviderError("down")
+            raise ProviderError("down")
 
     monkeypatch.setattr(api, "get_ai_gateway", lambda: Down())
     assert (

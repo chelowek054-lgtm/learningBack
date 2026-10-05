@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.ai_gateway import get_ai_gateway
-from core.ai_gateway.base import ProviderError
+from core.ai_base import ProviderError
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from core.tts import get_tts
 from modules.languages import listening

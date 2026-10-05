@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 
 from core import llm_cache
-from core.ai_gateway.base import GRADE_JSON_SCHEMA
+from core.ai_base import GRADE_JSON_SCHEMA
 from core.models import LlmCache, Rubric
 from tests.test_openai_gateway import SCHEMA, _gateway
 from tests.test_usage import _tool

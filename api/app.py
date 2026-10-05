@@ -9,17 +9,17 @@ from fastapi.responses import JSONResponse
 
 from core.admin import setup_admin
 from core import modules
-from core.ai_gateway.base import ProviderError
+from core.ai_base import ProviderError
 from core.config import settings
 from core.db import SessionLocal
 from core.usage import UserContextMiddleware
 from core.versioning import ClientVersionMiddleware, version_info
-from core.routers import auth, content, jobs, sync
-from core.routers import methods as methods_router
-from core.routers import modules_admin
-from core.routers import userdata as userdata_router
-from core.routers import monitoring as monitoring_router
-from core.routers import usage as usage_router
+from api.routers import auth, content, jobs, sync
+from api.routers import methods as methods_router
+from api.routers import modules_admin
+from api.routers import userdata as userdata_router
+from api.routers import monitoring as monitoring_router
+from api.routers import usage as usage_router
 
 log = logging.getLogger(__name__)
 

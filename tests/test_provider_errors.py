@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.ai_gateway.base import ProviderError
+from core.ai_base import ProviderError
 from modules.knowledge import goal_intake
 from tests.conftest import make_user
 

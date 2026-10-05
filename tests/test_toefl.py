@@ -154,7 +154,7 @@ def test_task1_rubric_scores_task_achievement_instead_of_task_response(session):
 
 
 def test_grader_prompt_includes_task_data():
-    from core.ai_gateway.base import render_prompt
+    from core.ai_base import render_prompt
     from core.models import Rubric
 
     rubric = Rubric(id="r", version=1, module="languages", model="", prompt="P", schema={})

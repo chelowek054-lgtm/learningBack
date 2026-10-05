@@ -9,7 +9,7 @@ import pytest
 from core import monitoring
 from core.config import settings
 from core.models import ClientError, Job, LlmUsage
-from core.routers import monitoring as monitoring_router
+from api.routers import monitoring as monitoring_router
 from tests.conftest import make_user
 
 

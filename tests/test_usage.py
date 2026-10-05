@@ -9,7 +9,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from core import usage
-from core.app import app
+from api.app import app
 from core.db import get_session
 from core.models import LlmUsage
 from core.security import create_access_token

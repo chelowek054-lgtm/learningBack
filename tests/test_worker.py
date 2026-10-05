@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from core import worker
-from core.ai_gateway.mock import MockAIGateway
+from core.ai_mock import MockAIGateway
 from core.config import settings
 from core.models import Job, Response
 from core.modules import sync_rubrics

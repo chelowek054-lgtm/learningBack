@@ -10,7 +10,7 @@ import json
 import httpx
 import pytest
 
-from core.ai_gateway.openai_compatible import _ATTEMPTS, OpenAICompatibleGateway
+from core.ai_openai import _ATTEMPTS, OpenAICompatibleGateway
 
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
@@ -151,8 +151,8 @@ def test_broken_json_in_arguments_is_reported():
 def test_key_selects_the_real_gateway(monkeypatch):
     """Есть ключ — идём к провайдеру; нет — честные заглушки, а не отказ."""
     from core import ai_gateway
-    from core.ai_gateway.mock import MockAIGateway
-    from core.ai_gateway.openai_compatible import OpenAICompatibleGateway
+    from core.ai_mock import MockAIGateway
+    from core.ai_openai import OpenAICompatibleGateway
 
     monkeypatch.setattr(ai_gateway.settings, "llm_api_key", "sk-test")
     assert isinstance(ai_gateway.get_ai_gateway(), OpenAICompatibleGateway)
@@ -173,7 +173,7 @@ def test_provider_is_an_address_not_a_class(monkeypatch):
         llm_model_generation="vendor/some-model",
     )
 
-    monkeypatch.setattr("core.ai_gateway.openai_compatible.settings", elsewhere)
+    monkeypatch.setattr("core.ai_openai.settings", elsewhere)
     gw = OpenAICompatibleGateway()
 
     assert str(gw._client.base_url).startswith("https://example-provider.test/v1")

@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core import mail
-from core.app import app
+from api.app import app
 from core.config import settings
 from core.deps import get_session
 from core.ratelimit import reset_request_limiter
