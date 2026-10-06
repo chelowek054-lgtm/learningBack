@@ -20,7 +20,12 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.create_table(
         "source_document",
-        sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id",
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("title", sa.String(), nullable=False),
         sa.Column("object_key", sa.String(), nullable=True),
         sa.Column("content_hash", sa.String(), nullable=False, unique=True),
@@ -34,7 +39,12 @@ def upgrade() -> None:
     )
     op.create_table(
         "source_fragment",
-        sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id",
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column(
             "document_id",
             pg.UUID(as_uuid=True),
@@ -49,7 +59,12 @@ def upgrade() -> None:
     op.create_index("idx_source_fragment_doc", "source_fragment", ["document_id", "ordinal"])
     op.create_table(
         "concept_source",
-        sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id",
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column(
             "concept_id",
             pg.UUID(as_uuid=True),
@@ -69,7 +84,12 @@ def upgrade() -> None:
     )
     op.create_table(
         "edge_source",
-        sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id",
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column(
             "edge_id",
             pg.UUID(as_uuid=True),
@@ -86,7 +106,12 @@ def upgrade() -> None:
     op.create_index("uq_edge_source", "edge_source", ["edge_id", "fragment_id"], unique=True)
     op.create_table(
         "review_log",
-        sa.Column("id", pg.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "id",
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("target_type", sa.String(), nullable=False),
         sa.Column("target_id", pg.UUID(as_uuid=True), nullable=False),
         sa.Column("reviewer_id", pg.UUID(as_uuid=True), sa.ForeignKey("user.id"), nullable=True),
