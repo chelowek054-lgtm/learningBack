@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     # Разбор документов в граф (modules.knowledge.ingest): размер окна и потолок окон на документ.
     ingest_window_fragments: int = 10
     ingest_max_windows: int = 60
+    max_source_bytes: int = 100 * 1024 * 1024
 
     # Эмбеддинги и слияние понятий (core.embeddings, modules.knowledge.merge).
     embedding_model: str = "baai/bge-m3"

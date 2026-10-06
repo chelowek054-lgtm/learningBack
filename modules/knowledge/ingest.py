@@ -434,3 +434,63 @@ def ingest_job(session: Session, job: Job, gateway) -> dict[str, Any]:
 
         merge.enqueue_merge(session, doc.domain, job.user_id)
     return state
+
+
+def progress(session: Session, doc: SourceDocument) -> dict[str, Any]:
+    """Где разбор документа: ждёт, идёт, готов, упал; сколько окон и что найдено (для админа)."""
+    from modules.knowledge.models import ConceptSource  # локально: избежать цикла импортов
+
+    state = dict((doc.meta or {}).get("ingest") or {})
+    jobs = [
+        j
+        for j in session.query(Job)
+        .filter_by(type=JOB_TYPE)
+        .order_by(Job.server_updated_at.desc())
+        .all()
+        if (j.input_ref or {}).get("documentId") == str(doc.id)
+    ]
+    job = jobs[0] if jobs else None
+    if state.get("status") == "done":
+        status = "done"
+    elif job is not None and job.status == "failed":
+        status = "failed"
+    elif job is not None and job.status in ("pending", "running"):
+        status = "running" if state.get("done") else "queued"
+    elif state.get("done"):
+        status = "running"
+    else:
+        status = "new"
+
+    frag_ids = [row[0] for row in session.query(SourceFragment.id).filter_by(document_id=doc.id)]
+    concept_ids = (
+        {
+            row[0]
+            for row in session.query(ConceptSource.concept_id).filter(
+                ConceptSource.fragment_id.in_(frag_ids)
+            )
+        }
+        if frag_ids
+        else set()
+    )
+    statuses = (
+        [row[0] for row in session.query(Concept.status).filter(Concept.id.in_(concept_ids))]
+        if concept_ids
+        else []
+    )
+    return {
+        "documentId": str(doc.id),
+        "title": doc.title,
+        "status": status,
+        "fragments": len(frag_ids),
+        "pages": (doc.meta or {}).get("pages"),
+        "windows": state.get("windows", 0),
+        "windowsDone": state.get("done", 0),
+        "truncated": bool(state.get("truncated")),
+        "concepts": len(concept_ids),
+        "drafts": sum(1 for s_ in statuses if s_ == provenance.DRAFT),
+        "verified": sum(1 for s_ in statuses if s_ == provenance.APPROVED),
+        "dropped": state.get("dropped", 0),
+        "error": (job.result or {}).get("error")
+        if job is not None and job.status == "failed"
+        else None,
+    }
