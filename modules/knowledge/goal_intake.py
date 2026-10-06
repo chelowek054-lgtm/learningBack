@@ -1,8 +1,13 @@
-"""Постановка цели как диалог (T-0061, R-0033): уточнение, пересказ, подтверждение.
+"""Постановка цели как диалог (T-0061, R-0033, T-0074, R-0041): уточнение, пересказ, подтверждение.
 
 Голая строка «название предмета» не даёт ни уточнить, ни проверить, что система поняла цель.
 Поэтому перед построением графа идёт диалог: свободный ввод → 2–4 уточняющих вопроса (на них
-можно не отвечать) → пересказ «область, цель, уровень» → явное подтверждение человеком.
+можно не отвечать) → пересказ → явное подтверждение человеком.
+
+Пять полей цели (R-0041): область; уровень, до которого учить; зачем (цель применения); что
+человек уже знает; ограничения (срок, часов в неделю, формат). Пропущенное поле не блокирует
+построение: оно берётся по умолчанию и перечислено в `assumed` («предположили»), чтобы человек
+видел, чего система не знает, и мог поправить.
 
 Пока цель не подтверждена, граф не строится и модель не тратится на построение. Хранится
 только итог (пересказ), а не переписка: она нужна лишь затем, чтобы получить итог.
@@ -24,6 +29,7 @@ from modules.knowledge.models import GoalIntake
 MIN_QUESTIONS = 2
 MAX_QUESTIONS = 4
 MAX_WISHES = 6
+MAX_HOURS_PER_WEEK = 100
 _MAX_TEXT = 300
 
 # Уровни, которые человек может назвать целью (те же, что в выборе уровня на клиенте).
@@ -53,6 +59,19 @@ SUMMARY_SCHEMA: dict[str, Any] = {
             "description": "важные подтемы и пожелания",
             "items": {"type": "string"},
         },
+        "knows": {
+            "type": "string",
+            "description": "что человек уже знает по теме, его словами; пусто, если не сказал",
+        },
+        "constraints": {
+            "type": "object",
+            "description": "ограничения, которые человек назвал; пустое поле — не назвал",
+            "properties": {
+                "deadline": {"type": "string", "description": "срок, как сказал человек"},
+                "hoursPerWeek": {"type": "number", "description": "часов в неделю"},
+                "format": {"type": "string", "description": "предпочитаемый формат занятий"},
+            },
+        },
     },
     "required": ["area", "goal", "level"],
 }
@@ -78,6 +97,7 @@ def _fixture_questions() -> list[str]:
     return [
         "Для чего вам это — работа, экзамен, интерес?",
         "С какого уровня начинаете: что уже знаете?",
+        "Есть ли срок и сколько часов в неделю можете заниматься?",
         "Какие подтемы особенно важны?",
     ]
 
@@ -113,9 +133,11 @@ def propose_questions(text: str) -> list[dict[str, str]]:
             QUESTIONS_SCHEMA,
             (
                 f"Человек хочет изучить: «{goal}». Задай от {MIN_QUESTIONS} до {MAX_QUESTIONS} "
-                "коротких уточняющих вопросов: для какой цели, с какого уровня, какие подтемы "
-                "важны. Если область двусмысленна, первым вопросом разреши двусмысленность. "
-                "Не задавай больше, чем нужно, чтобы понять область."
+                "коротких уточняющих вопросов. Нужно выяснить, если человек ещё не сказал: до какого "
+                "уровня учить, зачем это ему (цель применения), что он уже знает по теме, какие у "
+                "него ограничения (срок, часов в неделю, формат занятий). Спрашивай только о том, "
+                "чего в запросе нет. Если область двусмысленна, первым вопросом разреши "
+                "двусмысленность."
             ),
         )
         return clean_questions((raw or {}).get("questions"))
@@ -147,12 +169,47 @@ def clean_summary(raw: Any, text: str) -> dict[str, Any]:
         item = _text(w)
         if item and item not in wishes:
             wishes.append(item)
+    goal = _text(raw.get("goal"))
+    knows = _text(raw.get("knows"))
+    constraints = clean_constraints(raw.get("constraints"))
+    # Что человек не назвал, а система подставила сама: ему это показывают словами «предположили».
+    assumed = [
+        field
+        for field, stated in (
+            ("goal", bool(goal) and goal != area),
+            ("level", raw.get("level") in LEVELS),
+            ("knows", bool(knows)),
+            ("constraints", bool(constraints)),
+        )
+        if not stated
+    ]
     return {
         "area": area,
-        "goal": _text(raw.get("goal")) or area,
+        "goal": goal or area,
         "level": level,
         "wishes": wishes[:MAX_WISHES],
+        "knows": knows,
+        "constraints": constraints,
+        "assumed": assumed,
     }
+
+
+def clean_constraints(raw: Any) -> dict[str, Any]:
+    """Ограничения: срок и формат — текст, часы в неделю — число от 0 до 100; пустое не хранится."""
+    raw = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {}
+    if deadline := _text(raw.get("deadline"), 100):
+        out["deadline"] = deadline
+    if fmt := _text(raw.get("format"), 100):
+        out["format"] = fmt
+    hours = raw.get("hoursPerWeek")
+    if (
+        isinstance(hours, int | float)
+        and not isinstance(hours, bool)
+        and 0 < hours <= MAX_HOURS_PER_WEEK
+    ):
+        out["hoursPerWeek"] = int(hours) if hours == int(hours) else float(hours)
+    return out
 
 
 def summarize(text: str, answers: list[dict[str, Any]]) -> dict[str, Any]:
@@ -169,9 +226,11 @@ def summarize(text: str, answers: list[dict[str, Any]]) -> dict[str, Any]:
             SUMMARY_SCHEMA,
             (
                 f"Человек хочет изучить: «{goal}».\nУточнения:\n{dialog}\n"
-                "Сформулируй: область, цель (для чего), уровень (remember — узнавать термины, "
-                "understand — объяснять своими словами, apply — решать задачи, create — "
-                "создавать своё) и важные подтемы. Опирайся только на сказанное человеком."
+                "Сформулируй пять полей: область; цель (зачем это человеку); уровень (remember — узнавать "
+                "термины, understand — объяснять своими словами, apply — решать задачи, create — "
+                "создавать своё); что он уже знает; ограничения (срок, часов в неделю, формат). "
+                "Плюс важные подтемы. Опирайся ТОЛЬКО на сказанное человеком: чего он не сказал, "
+                "оставляй пустым, не придумывай."
             ),
         )
     else:
@@ -179,7 +238,10 @@ def summarize(text: str, answers: list[dict[str, Any]]) -> dict[str, Any]:
         raw = {
             "area": goal,
             "goal": given[0]["answer"] if given else goal,
-            "level": DEFAULT_LEVEL,
+            # Без модели ответ нельзя отнести к «знает» или «ограничениям»: порядок вопросов
+            # после пропусков неизвестен, а домысел хуже пустого поля.
+            "knows": "",
+            "constraints": {},
             "wishes": [a["answer"] for a in given[1:]],
         }
     return clean_summary(raw, goal)
@@ -190,6 +252,16 @@ def as_goal_text(summary: dict[str, Any]) -> str:
     parts = [str(summary.get("area") or "")]
     if summary.get("goal") and summary["goal"] != summary.get("area"):
         parts.append(f"цель: {summary['goal']}")
+    if summary.get("knows"):
+        parts.append(f"уже знает: {summary['knows']}")
+    constraints = summary.get("constraints") or {}
+    limits = [
+        f"срок {constraints['deadline']}" if constraints.get("deadline") else "",
+        f"{constraints['hoursPerWeek']} ч в неделю" if constraints.get("hoursPerWeek") else "",
+        f"формат: {constraints['format']}" if constraints.get("format") else "",
+    ]
+    if any(limits):
+        parts.append("ограничения: " + ", ".join(x for x in limits if x))
     if summary.get("wishes"):
         parts.append("важно: " + "; ".join(summary["wishes"]))
     return ". ".join(p for p in parts if p)
@@ -231,6 +303,7 @@ def view(row: GoalIntake | None) -> dict[str, Any]:
 __all__ = [
     "GoalIntakeError",
     "as_goal_text",
+    "clean_constraints",
     "clean_questions",
     "clean_summary",
     "confirm",
