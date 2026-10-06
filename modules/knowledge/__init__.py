@@ -25,7 +25,14 @@ class KnowledgeModule(BackendModule):
         title="Граф знаний, курс и плейсмент",
         version="1.0",
         provides=frozenset(
-            {"routes", "admin_views", "study_methods", "evidence", "study_preferences"}
+            {
+                "routes",
+                "admin_views",
+                "study_methods",
+                "evidence",
+                "study_preferences",
+                "job_handlers",
+            }
         ),
         requires=frozenset(
             {
@@ -118,6 +125,12 @@ class KnowledgeModule(BackendModule):
         from modules.knowledge.admin import VIEWS
 
         return VIEWS
+
+    def job_handlers(self):
+        """Разбор документа в понятия идёт фоновой задачей (T-0077), а не на запросе человека."""
+        from modules.knowledge.ingest import JOB_TYPE, ingest_job
+
+        return {JOB_TYPE: ingest_job}
 
 
 backend = KnowledgeModule()

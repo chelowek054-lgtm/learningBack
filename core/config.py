@@ -114,6 +114,10 @@ class Settings(BaseSettings):
 
     stt_model: str = ""
 
+    # Разбор документов в граф (modules.knowledge.ingest): размер окна и потолок окон на документ.
+    ingest_window_fragments: int = 10
+    ingest_max_windows: int = 60
+
     # Почта (core.mail): любой SMTP. Пусто → письма только в лог (вне production).
     smtp_host: str = ""
     smtp_port: int = 587
