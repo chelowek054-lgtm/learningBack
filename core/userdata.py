@@ -26,6 +26,7 @@ from core.models import (
     DataPermission,
     Job,
     Material,
+    PushDevice,
     Response,
     SrsCard,
     User,
@@ -169,6 +170,14 @@ def core_types() -> list[DataType]:
         ),
         model_type(
             Material, "material", "Загруженные материалы", "core", "Материалы человека", None
+        ),
+        model_type(
+            PushDevice,
+            "push_device",
+            "Устройства для уведомлений",
+            "core",
+            "Доставка уведомлений о курсе при закрытом приложении",
+            None,
         ),
     ]
 

@@ -14,7 +14,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from core.models import Activity
+from core import push
+from core.models import Activity, Job
 
 from modules.knowledge import provenance
 from modules.knowledge.models import Concept, Course, Notification
@@ -32,6 +33,39 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     if 2 <= m10 <= 4 and not 12 <= m100 <= 14:
         return few
     return many
+
+
+def announce(session: Session, note: Notification) -> None:
+    """Сообщить о новом уведомлении вне приложения. Сбой канала сборку курса не ломает."""
+    push.enqueue(session, note.user_id, {"notificationId": str(note.id)})
+
+
+def push_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
+    """Задача отправки push: ValueError — навсегда (нет уведомления), остальное — повтор по правилам очереди.
+
+    Текст общий: вид уведомления и область, без названий понятий и источников.
+    """
+    try:
+        note = session.get(
+            Notification, uuid.UUID(str((job.input_ref or {}).get("notificationId")))
+        )
+    except ValueError as e:
+        raise ValueError("notificationId некорректен") from e
+    if note is None:
+        raise ValueError("Уведомление не найдено")
+    if note.read_at is not None:
+        return {"sent": 0, "skipped": "already_read"}
+    return push.deliver(
+        session,
+        note.user_id,
+        lambda token: {
+            "to": token,
+            "title": note.title,
+            "body": f"Область: {note.domain}",
+            "sound": "default",
+            "data": {"notificationId": str(note.id), "kind": note.kind, "domain": note.domain},
+        },
+    )
 
 
 def course_ready(
@@ -58,6 +92,7 @@ def course_ready(
     )
     session.add(note)
     session.flush()
+    announce(session, note)
     return note
 
 
@@ -66,6 +101,7 @@ def course_extended(session: Session, domain: str, added: int, drafts: int) -> i
     if added <= 0:
         return 0
     user_ids = [row[0] for row in session.query(Course.user_id).filter_by(domain=domain).all()]
+    fresh: list[Notification] = []
     for uid in user_ids:
         note = (
             session.query(Notification)
@@ -77,6 +113,7 @@ def course_extended(session: Session, domain: str, added: int, drafts: int) -> i
                 user_id=uid, kind=EXTENDED, domain=domain, title="", body="", data={}
             )
             session.add(note)
+            fresh.append(note)
         total = int((note.data or {}).get("added", 0)) + added
         unverified = int((note.data or {}).get("drafts", 0)) + drafts
         note.data = {"added": total, "drafts": unverified}
@@ -88,6 +125,8 @@ def course_extended(session: Session, domain: str, added: int, drafts: int) -> i
             note.body += f" {UNVERIFIED} Из них черновых: {unverified}."
         note.created_at = datetime.now(timezone.utc)
     session.flush()
+    for note in fresh:  # push — только о новом уведомлении: накопление непрочитанного молчит
+        announce(session, note)
     return len(user_ids)
 
 
@@ -176,6 +215,7 @@ def _collect(
         .filter_by(user_id=user_id, kind=kind, domain=domain, read_at=None)
         .first()
     )
+    is_new = note is None
     if note is None:
         note = Notification(user_id=user_id, kind=kind, domain=domain, title="", body="", data={})
         session.add(note)
@@ -193,6 +233,9 @@ def _collect(
             f"{what[:200]}. Рекомендуем повторить шаг."
         )
     note.created_at = datetime.now(timezone.utc)
+    if is_new:
+        session.flush()
+        announce(session, note)
     return note
 
 

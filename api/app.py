@@ -19,6 +19,7 @@ from api.routers import methods as methods_router
 from api.routers import modules_admin
 from api.routers import userdata as userdata_router
 from api.routers import monitoring as monitoring_router
+from api.routers import push as push_router
 from api.routers import usage as usage_router
 
 log = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ _routers = [
     modules_admin.router,
     userdata_router.router,
     userdata_router.retention,
+    push_router.router,
     methods_router.router,
 ]
 for _router in _routers:
