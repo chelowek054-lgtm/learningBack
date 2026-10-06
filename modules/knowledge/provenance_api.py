@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 
+from core.config import settings
 from core.deps import CurrentSuperuser, SessionDep
-from modules.knowledge import provenance
+from core.materials import NothingToExtract, UnsupportedFile
+from modules.knowledge import ingest, provenance
 from modules.knowledge.models import Concept, ConceptEdge, SourceDocument
 
 router = APIRouter(tags=["provenance"])
@@ -100,6 +102,7 @@ def list_sources(_: CurrentSuperuser, session: SessionDep) -> list[dict]:
             "license": d.license,
             "originUrl": d.origin_url,
             "createdAt": d.created_at.isoformat() if d.created_at else None,
+            "progress": ingest.progress(session, d),
         }
         for d in docs
     ]
@@ -141,3 +144,68 @@ def delete_source(
         "edgesDeleted": report.edges_deleted,
         "fileDeleted": report.file_deleted,
     }
+
+
+@router.post("/sources", status_code=status.HTTP_201_CREATED)
+async def upload_source(
+    user: CurrentSuperuser,
+    session: SessionDep,
+    file: UploadFile = File(...),
+    domain: str = Form(..., min_length=1, max_length=200),
+    title: str | None = Form(None, max_length=300),
+    level: str | None = Form(None, max_length=50),
+    license: str | None = Form(None, max_length=200),
+    origin_url: str | None = Form(None, max_length=1000),
+) -> dict:
+    """Загрузить учебник (PDF, Markdown, текст) в канон: файл — в хранилище, разбор — в очередь.
+
+    Тот же файл второй раз дубля не создаёт: вернётся прежний документ и его прогресс. Файл без
+    текстового слоя (скан) отклоняется сразу с объяснением, а не после часа разбора.
+    """
+    data = await file.read(settings.max_source_bytes + 1)
+    if len(data) > settings.max_source_bytes:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            f"Файл больше {settings.max_source_bytes // (1024 * 1024)} МБ",
+        )
+    if not data:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Файл пустой")
+    filename = file.filename or "source"
+    # Проверяем читаемость до записи в хранилище: скан и битый PDF не должны оставлять следов.
+    try:
+        probe = ingest.materials.extract(filename, data)
+    except UnsupportedFile as e:
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, str(e)) from e
+    except NothingToExtract as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    try:
+        doc, created = provenance.add_document(
+            session,
+            title=(title or "").strip() or probe.title,
+            data=data,
+            added_by=user.id,
+            domain=domain.strip(),
+            level=(level or "").strip() or None,
+            license=(license or "").strip() or None,
+            origin_url=(origin_url or "").strip() or None,
+            meta={"filename": filename},
+        )
+    except provenance.ProvenanceError as e:
+        raise _fail(e) from e
+    if created:
+        ingest.parse_document(session, doc, filename, data)
+    view = ingest.progress(session, doc)
+    if view["status"] in ("new", "failed"):
+        # Новый документ, а также повторная загрузка после сбоя: разбор в очередь воркера.
+        ingest.enqueue_ingest(session, doc, user.id)
+        view = ingest.progress(session, doc)
+    session.commit()
+    return {"created": created, **view}
+
+
+@router.get("/sources/{document_id}/progress")
+def source_progress(document_id: str, _: CurrentSuperuser, session: SessionDep) -> dict:
+    doc = session.get(SourceDocument, _uuid(document_id, "document"))
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "document не найден")
+    return ingest.progress(session, doc)
