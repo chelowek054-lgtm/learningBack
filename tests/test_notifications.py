@@ -226,3 +226,29 @@ def test_repeating_a_finished_ingestion_does_not_notify_twice(session, store):
     notifications.mark_read(session, user.id)
     process_job(session, ingest.enqueue_ingest(session, doc, user.id), Gateway())
     assert notifications.listing(session, user.id) == []
+
+
+# ---- статус на экране узла ----
+
+
+def test_step_payload_marks_draft_and_verified_nodes_without_any_source(session, client):
+    from core.models import Activity
+    from modules.knowledge.course import generate_course as build
+
+    user = make_user(session)
+    draft = concept(session, "Draft one")
+    verified = concept(session, "Verified one", status="approved")
+    course = build(session, user.id, DOMAIN, "understand", [])
+    session.flush()
+    api = As(client, user)
+    for node, expected in ((draft, "draft"), (verified, "verified")):
+        r = api.post(f"/graph/course/{DOMAIN}/step/{node.id}/start")
+        assert r.status_code == 200, r.text
+    statuses = {}
+    for a in session.query(Activity).filter_by(user_id=user.id).all():
+        p = a.payload or {}
+        if p.get("title") in ("Draft one", "Verified one"):
+            statuses[p["title"]] = p.get("status")
+            assert "sources" not in p and "fragment" not in str(p).lower()
+    assert statuses == {"Draft one": "draft", "Verified one": "verified"}
+    assert course is not None
