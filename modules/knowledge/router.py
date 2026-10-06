@@ -16,6 +16,7 @@ from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.cross_links_api import router as _cross_links_router
 from modules.knowledge.domains_api import router as _domains_router
 from modules.knowledge.provenance_api import router as _provenance_router
+from modules.knowledge.notifications_api import router as _notifications_router
 from modules.knowledge.review_api import router as _review_router
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph, resolve_node
@@ -41,7 +42,7 @@ from modules.knowledge.material_graph import (
     propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
-from modules.knowledge import events, goal_intake, provenance, subdomains
+from modules.knowledge import events, goal_intake, notifications, provenance, subdomains
 from modules.knowledge.events import NodeChanged
 from modules.knowledge.schemas import (
     GoalBuildIn,
@@ -73,6 +74,7 @@ router.include_router(_cross_links_router)
 router.include_router(_domains_router)
 router.include_router(_provenance_router)
 router.include_router(_review_router)
+router.include_router(_notifications_router)
 
 
 # ---- чтение эффективного графа (COW) ----
@@ -528,8 +530,10 @@ def create_course(domain: str, body: CourseIn, user: CurrentUser, session: Sessi
         course = generate_course(session, user.id, domain, body.target_bloom, list(body.interests))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    view = course_view(course, session)
+    notifications.course_ready(session, user.id, domain, view["total"], view.get("draftSteps", 0))
     session.commit()
-    return course_view(course, session)
+    return view
 
 
 @router.get("/course/{domain}")

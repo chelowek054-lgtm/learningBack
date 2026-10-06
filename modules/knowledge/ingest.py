@@ -430,9 +430,12 @@ def ingest_job(session: Session, job: Job, gateway) -> dict[str, Any]:
     state = ingest(session, doc, gateway)
     if not state.get("skipped") and state.get("concepts") and doc.domain:
         # Новые понятия могут дублировать уже стоящие: слияние области идёт следующей задачей.
-        from modules.knowledge import merge
+        from modules.knowledge import merge, notifications
 
         merge.enqueue_merge(session, doc.domain, job.user_id)
+        # Те, кто уже учится по области, узнают, что граф пополнился и что это черновик.
+        added = int(state["concepts"])
+        notifications.course_extended(session, doc.domain, added, added)
     return state
 
 

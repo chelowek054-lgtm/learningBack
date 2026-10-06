@@ -398,3 +398,25 @@ class DomainSpecialist(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (Index("uq_domain_specialist", "user_id", "domain", unique=True),)
+
+
+class Notification(Base):
+    """Уведомление человеку о его курсе: готов, дополнен, проверен (T-0083, R-0044)."""
+
+    __tablename__ = "notification"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    # course_ready | course_extended
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    domain: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    # Сколько понятий добавлено и сколько из них ещё не проверено: нужно, чтобы копить, а не плодить.
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    read_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
+
+    __table_args__ = (Index("idx_notification_user_unread", "user_id", "read_at"),)
