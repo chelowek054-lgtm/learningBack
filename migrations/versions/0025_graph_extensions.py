@@ -23,7 +23,10 @@ GRAPH = "knowledge"
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute("CREATE EXTENSION IF NOT EXISTS age")
-    # AGE ищет свои классы операторов в ag_catalog: без него create_graph падает.
+    # AGE ищет свои классы операторов в ag_catalog: без него create_graph падает. Путь меняется
+    # только на время create_graph и возвращается: все миграции идут одной транзакцией, и
+    # оставленный ag_catalog в начале пути отправил бы таблицы следующих миграций не в public.
+    saved = op.get_bind().exec_driver_sql("SHOW search_path").scalar()
     op.execute('SET LOCAL search_path = ag_catalog, "$user", public')
     # create_graph падает, если граф уже есть: проверяем сами, чтобы миграция была повторяема.
     op.execute(
@@ -37,9 +40,11 @@ def upgrade() -> None:
         $$
         """
     )
+    op.execute(f"SET LOCAL search_path = {saved}")
 
 
 def downgrade() -> None:
+    saved = op.get_bind().exec_driver_sql("SHOW search_path").scalar()
     op.execute('SET LOCAL search_path = ag_catalog, "$user", public')
     op.execute(
         f"""
@@ -54,3 +59,4 @@ def downgrade() -> None:
     )
     op.execute("DROP EXTENSION IF EXISTS age")
     op.execute("DROP EXTENSION IF EXISTS vector")
+    op.execute(f"SET LOCAL search_path = {saved}")
