@@ -12,9 +12,9 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from pydantic import BaseModel, Field
 
 from core.config import settings
-from core.deps import CurrentSuperuser, SessionDep
+from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from core.materials import NothingToExtract, UnsupportedFile
-from modules.knowledge import ingest, provenance
+from modules.knowledge import ingest, provenance, review
 from modules.knowledge.models import Concept, ConceptEdge, SourceDocument
 
 router = APIRouter(tags=["provenance"])
@@ -37,11 +37,12 @@ def _fail(e: provenance.ProvenanceError) -> HTTPException:
 
 
 @router.get("/canon/nodes/{concept_id}/sources")
-def node_sources(concept_id: str, _: CurrentSuperuser, session: SessionDep) -> dict:
+def node_sources(concept_id: str, user: CurrentUser, session: SessionDep) -> dict:
     cid = _uuid(concept_id, "concept")
     concept = session.get(Concept, cid)
     if concept is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
+    review.require_reviewer(session, user, concept.domain)  # администратор или специалист области
     return {
         "status": concept.status,
         "sources": provenance.concept_sources(session, cid),
@@ -50,11 +51,12 @@ def node_sources(concept_id: str, _: CurrentSuperuser, session: SessionDep) -> d
 
 
 @router.get("/canon/edges/{edge_id}/sources")
-def edge_sources(edge_id: str, _: CurrentSuperuser, session: SessionDep) -> dict:
+def edge_sources(edge_id: str, user: CurrentUser, session: SessionDep) -> dict:
     eid = _uuid(edge_id, "edge")
     edge = session.get(ConceptEdge, eid)
     if edge is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "edge не найден")
+    review.require_reviewer(session, user, session.get(Concept, edge.from_id).domain)
     return {
         "status": edge.status,
         "sources": provenance.edge_sources(session, eid),
@@ -63,12 +65,11 @@ def edge_sources(edge_id: str, _: CurrentSuperuser, session: SessionDep) -> dict
 
 
 @router.post("/canon/nodes/{concept_id}/review")
-def review_node(
-    concept_id: str, body: ReviewIn, user: CurrentSuperuser, session: SessionDep
-) -> dict:
+def review_node(concept_id: str, body: ReviewIn, user: CurrentUser, session: SessionDep) -> dict:
     concept = session.get(Concept, _uuid(concept_id, "concept"))
     if concept is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
+    review.require_reviewer(session, user, concept.domain)
     try:
         provenance.review_concept(session, concept, user.id, body.action, body.note)
     except provenance.ProvenanceError as e:
@@ -78,10 +79,11 @@ def review_node(
 
 
 @router.post("/canon/edges/{edge_id}/review")
-def review_edge(edge_id: str, body: ReviewIn, user: CurrentSuperuser, session: SessionDep) -> dict:
+def review_edge(edge_id: str, body: ReviewIn, user: CurrentUser, session: SessionDep) -> dict:
     edge = session.get(ConceptEdge, _uuid(edge_id, "edge"))
     if edge is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "edge не найден")
+    review.require_reviewer(session, user, session.get(Concept, edge.from_id).domain)
     try:
         provenance.review_edge(session, edge, user.id, body.action, body.note)
     except provenance.ProvenanceError as e:

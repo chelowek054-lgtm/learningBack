@@ -382,3 +382,19 @@ class ConceptConflict(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (Index("uq_concept_conflict_pair", "a_id", "b_id", unique=True),)
+
+
+class DomainSpecialist(Base):
+    """Специалист по области: назначается администратором, проверяет знания только своих областей."""
+
+    __tablename__ = "domain_specialist"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    domain: Mapped[str] = mapped_column(String, nullable=False)
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("uq_domain_specialist", "user_id", "domain", unique=True),)
