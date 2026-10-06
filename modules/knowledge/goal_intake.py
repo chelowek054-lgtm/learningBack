@@ -51,7 +51,10 @@ QUESTIONS_SCHEMA: dict[str, Any] = {
 SUMMARY_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "area": {"type": "string", "description": "область, как её понял собеседник"},
+        "area": {
+            "type": "string",
+            "description": "только название области (например: «английский язык»), без цели и уровня",
+        },
         "goal": {"type": "string", "description": "для чего человеку это нужно"},
         "level": {"type": "string", "enum": list(LEVELS)},
         "wishes": {
