@@ -160,7 +160,7 @@ class ArxivFinder:
                 (
                     link.get("href", "")
                     for link in entry.findall("a:link", ATOM)
-                    if link.get("title") == "pdf"
+                    if link.get("type") == "application/pdf"
                 ),
                 "",
             )
