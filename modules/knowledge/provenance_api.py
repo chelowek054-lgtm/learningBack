@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from core.config import settings
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from core.materials import NothingToExtract, UnsupportedFile
-from modules.knowledge import ingest, provenance, review, source_search
+from modules.knowledge import gap_search, ingest, provenance, review, source_search
 from modules.knowledge.models import Concept, ConceptEdge, SourceDocument
 
 router = APIRouter(tags=["provenance"])
@@ -259,3 +259,40 @@ def fetch_sources(body: FetchIn, user: CurrentSuperuser, session: SessionDep) ->
     result = source_search.fetch_and_queue(session, user.id, body.domain.strip(), candidates)
     session.commit()
     return result
+
+
+class GapRequest(BaseModel):
+    area: str = Field(min_length=1, max_length=200)
+    query: str = Field(default="", max_length=300)
+
+
+class GapFillIn(BaseModel):
+    target: str = Field(default="understand", max_length=30)
+    areas: list[GapRequest] = Field(min_length=1, max_length=10)
+
+
+@router.get("/sources/gaps/{domain}")
+def source_gaps(
+    domain: str, user: CurrentSuperuser, session: SessionDep, target: str = "understand"
+) -> dict:
+    """Базовые области цели, которых нет в графе: готовый запрос и ход разбора их документов."""
+    return gap_search.gaps(session, user.id, domain, target)
+
+
+@router.post("/sources/gaps/{domain}/fill", status_code=status.HTTP_202_ACCEPTED)
+def fill_source_gaps(
+    domain: str, body: GapFillIn, user: CurrentSuperuser, session: SessionDep
+) -> dict:
+    """Найти по белому списку и поставить в разбор источники для выбранных пробелов."""
+    try:
+        results = gap_search.fill(
+            session,
+            user.id,
+            domain,
+            body.target,
+            [r.model_dump() for r in body.areas],
+        )
+    except gap_search.GapError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    session.commit()
+    return {"results": results}
