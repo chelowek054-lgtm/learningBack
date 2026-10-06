@@ -154,15 +154,27 @@ def test_every_source_route_refuses_a_learner(session, client, world):
     assert seen >= 8
 
 
-def test_admin_routes_for_sources_are_admin_only_by_declaration(world):
-    """Каждый маршрут источников объявляет зависимость «суперпользователь», а не полагается на память."""
-    names = set()
+# Эти маршруты открыты и специалисту области (T-0081): право проверяется внутри, по области понятия.
+REVIEWER_ROUTES = (
+    "/v1/graph/canon/nodes/{concept_id}/sources",
+    "/v1/graph/canon/edges/{edge_id}/sources",
+    "/v1/graph/canon/nodes/{concept_id}/review",
+    "/v1/graph/canon/edges/{edge_id}/review",
+)
+
+
+def test_source_routes_are_admin_only_by_declaration_except_the_reviewer_ones(world):
+    """Каждый маршрут источников объявляет «суперпользователя», кроме явно перечисленных проверяющих."""
+    admin_only = set()
     for path, route in api_routes():
-        if "/sources" in path or path.endswith("/review"):
+        if "/sources" in path or path.endswith("/review") or "/specialists" in path:
             deps = {d.call.__name__ for d in route.dependant.dependencies}
-            names.add(path)
-            assert "get_current_superuser" in deps, path
-    assert len(names) >= 6
+            if path in REVIEWER_ROUTES:
+                assert "get_current_user" in deps, path
+            else:
+                admin_only.add(path)
+                assert "get_current_superuser" in deps, path
+    assert len(admin_only) >= 6
 
 
 def test_admin_still_gets_everything_the_learner_must_not(session, client, world):
