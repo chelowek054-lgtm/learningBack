@@ -119,6 +119,16 @@ class Settings(BaseSettings):
     ingest_max_windows: int = 60
     max_source_bytes: int = 100 * 1024 * 1024
 
+    # Поиск источников (modules.knowledge.source_search, A-0027): скачивать можно только с этих доменов
+    # (и их поддоменов). Список расширяет администратор переменной SOURCE_DOMAINS.
+    source_domains: str = (
+        "wikibooks.org,openstax.org,libretexts.org,arxiv.org,gutenberg.org,docs.python.org"
+    )
+    source_fetch_timeout: float = 30.0
+    source_fetch_max_bytes: int = 100 * 1024 * 1024
+    source_max_docs_per_request: int = 3
+    brave_api_key: str = ""  # веб-поиск (A-0028): пусто — только каталоги
+
     # Эмбеддинги и слияние понятий (core.embeddings, modules.knowledge.merge).
     embedding_model: str = "baai/bge-m3"
     embedding_dim: int = 1024

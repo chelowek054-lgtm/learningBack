@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from core.config import settings
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from core.materials import NothingToExtract, UnsupportedFile
-from modules.knowledge import ingest, provenance, review
+from modules.knowledge import ingest, provenance, review, source_search
 from modules.knowledge.models import Concept, ConceptEdge, SourceDocument
 
 router = APIRouter(tags=["provenance"])
@@ -211,3 +211,51 @@ def source_progress(document_id: str, _: CurrentSuperuser, session: SessionDep) 
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "document не найден")
     return ingest.progress(session, doc)
+
+
+class CandidateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    url: str = Field(min_length=8, max_length=1000)
+    provider: str = Field(default="manual", max_length=50)
+    license: str = Field(default="не определена", max_length=200)
+    kind: str = Field(pattern="^(wikitext|pdf|html)$")
+    summary: str = Field(default="", max_length=400)
+
+
+class SearchIn(BaseModel):
+    query: str = Field(min_length=3, max_length=300)
+    limit: int = Field(default=5, ge=1, le=10)
+
+
+class FetchIn(BaseModel):
+    domain: str = Field(min_length=1, max_length=200)
+    candidates: list[CandidateIn] = Field(min_length=1, max_length=10)
+
+
+@router.post("/sources/search")
+def search_sources(body: SearchIn, _: CurrentSuperuser) -> dict:
+    """Найти источники в каталогах белого списка (и веб-поиском, если настроен). Ничего не скачивает."""
+    try:
+        found, problems = source_search.search(body.query, body.limit)
+    except source_search.SearchError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    return {
+        "candidates": [c.dump() for c in found],
+        "problems": problems,
+        "domains": sorted(source_search.allowed_domains()),
+    }
+
+
+@router.post("/sources/fetch", status_code=status.HTTP_202_ACCEPTED)
+def fetch_sources(body: FetchIn, user: CurrentSuperuser, session: SessionDep) -> dict:
+    """Скачать выбранное и поставить разбор в очередь; адрес вне белого списка отклоняется."""
+    candidates = [source_search.Candidate(**c.model_dump()) for c in body.candidates]
+    outside = [c.url for c in candidates if not source_search.host_allowed(c.url)]
+    if outside:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Адрес вне белого списка доменов: {outside[0]}",
+        )
+    result = source_search.fetch_and_queue(session, user.id, body.domain.strip(), candidates)
+    session.commit()
+    return result
