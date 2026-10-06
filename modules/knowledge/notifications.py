@@ -14,10 +14,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from core.models import Activity
+
 from modules.knowledge import provenance
 from modules.knowledge.models import Concept, Course, Notification
 
 READY, EXTENDED = "course_ready", "course_extended"
+VERIFIED, CHANGED = "concept_verified", "concept_changed"
+MAX_NAMED = 3  # сколько названий понятий перечислять в тексте, остальные — «и ещё N»
 UNVERIFIED = "Не проверено специалистом: содержание собрано автоматически."
 
 
@@ -134,3 +138,100 @@ def mark_read(session: Session, user_id: uuid.UUID, ids: list[uuid.UUID] | None 
         n.read_at = now
     session.flush()
     return len(rows)
+
+
+# ---- проверка и правка понятий (T-0085) ----
+
+
+def _learners(
+    session: Session, concept_id: uuid.UUID, *, completed: bool
+) -> list[tuple[uuid.UUID, str]]:
+    """(человек, область курса): у кого понятие в пути курса или, если `completed`, уже пройдено."""
+    cid = str(concept_id)
+    q = session.query(Course.user_id, Course.domain)
+    q = q.filter(
+        Course.progress.contains({"completed": [cid]})
+        if completed
+        else Course.path.contains([{"conceptId": cid}])
+    )
+    return [(uid, domain) for uid, domain in q.all()]
+
+
+def _names(entries: list[dict[str, Any]]) -> str:
+    shown = ", ".join(f"«{e['title']}»" for e in entries[:MAX_NAMED])
+    rest = len(entries) - MAX_NAMED
+    return shown + (f" и ещё {rest}" if rest > 0 else "")
+
+
+def _collect(
+    session: Session,
+    user_id: uuid.UUID,
+    kind: str,
+    domain: str,
+    entry: dict[str, Any],
+) -> Notification:
+    """Прибавить понятие к непрочитанному уведомлению того же вида; нового не плодить."""
+    note = (
+        session.query(Notification)
+        .filter_by(user_id=user_id, kind=kind, domain=domain, read_at=None)
+        .first()
+    )
+    if note is None:
+        note = Notification(user_id=user_id, kind=kind, domain=domain, title="", body="", data={})
+        session.add(note)
+    entries = list((note.data or {}).get("concepts", []))
+    entries = [e for e in entries if e["id"] != entry["id"]] + [entry]
+    note.data = {"concepts": entries}
+    if kind == VERIFIED:
+        note.title = "Понятие проверено"
+        note.body = f"Специалист проверил: {_names(entries)}. Пометка «Черновик» снята."
+    else:
+        note.title = "Понятие изменено"
+        what = entries[-1].get("what") or "изменено изложение"
+        note.body = (
+            f"В понятиях, которые вы уже прошли, изменился смысл: {_names(entries)}. "
+            f"{what[:200]}. Рекомендуем повторить шаг."
+        )
+    note.created_at = datetime.now(timezone.utc)
+    return note
+
+
+def sync_activity_status(session: Session, concept: Concept) -> int:
+    """Обновить пометку «проверено/черновик» в уже выданных заданиях шага (уйдёт при синхронизации)."""
+    status = "verified" if concept.status == provenance.APPROVED else "draft"
+    changed = 0
+    for act in session.query(Activity).filter(
+        Activity.payload["conceptId"].as_string() == str(concept.id)
+    ):
+        if (act.payload or {}).get("status") not in (None, status):
+            act.payload = {**act.payload, "status": status}
+            changed += 1
+    session.flush()
+    return changed
+
+
+def concept_reviewed(session: Session, concept: Concept, before: str) -> int:
+    """Понятие проверили или отклонили. Подтверждение уведомляет тех, у кого оно в курсе."""
+    sync_activity_status(session, concept)
+    if before == provenance.APPROVED or concept.status != provenance.APPROVED:
+        return 0
+    people = _learners(session, concept.id, completed=False)
+    for uid, domain in people:
+        _collect(session, uid, VERIFIED, domain, {"id": str(concept.id), "title": concept.title})
+    session.flush()
+    return len(people)
+
+
+def concept_changed(session: Session, concept: Concept, what: str) -> int:
+    """Смысл понятия изменился: сообщить только тем, кто его уже прошёл."""
+    people = _learners(session, concept.id, completed=True)
+    for uid, domain in people:
+        _collect(
+            session,
+            uid,
+            CHANGED,
+            domain,
+            {"id": str(concept.id), "title": concept.title, "what": what},
+        )
+    session.flush()
+    return len(people)

@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.models import User
-from modules.knowledge import merge, provenance
+from modules.knowledge import merge, notifications, provenance
 from modules.knowledge.models import (
     Concept,
     ConceptConflict,
@@ -197,6 +197,7 @@ def edit_concept(
     """Исправить название или изложение; статус не меняется, правка пишется в журнал."""
     require_reviewer(session, reviewer, concept.domain)
     changes = []
+    meaning_changed = False
     if title is not None and title.strip() and title.strip() != concept.title:
         changes.append(f"название: «{concept.title}» → «{title.strip()}»")
         concept.title = title.strip()[:200]
@@ -204,6 +205,7 @@ def edit_concept(
         content = dict(concept.content or {})
         if summary.strip() != content.get("summary"):
             changes.append("изложение исправлено")
+            meaning_changed = True
             content["summary"] = summary.strip()
             concept.content = content
     if not changes:
@@ -211,6 +213,15 @@ def edit_concept(
     text = "; ".join(changes) + (f" — {note.strip()}" if note and note.strip() else "")
     provenance._log(session, "concept", concept.id, reviewer.id, "edit", text)  # noqa: SLF001
     session.flush()
+    if meaning_changed:
+        # Переименование смысла не меняет; исправленное изложение — меняет, и прошедшие должны знать.
+        notifications.concept_changed(
+            session,
+            concept,
+            f"Изложение исправлено — {note.strip()}"
+            if note and note.strip()
+            else "Изложение исправлено",
+        )
     return concept
 
 

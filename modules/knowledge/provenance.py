@@ -234,9 +234,14 @@ def review_concept(
         raise ProvenanceError("bad_action", "Действие: approve или reject")
     if action == "reject" and not (note or "").strip():
         raise ProvenanceError("note_required", "Отклонение требует причины")
+    before = concept.status
     concept.status = ACTIONS[action]
     _log(session, "concept", concept.id, reviewer_id, action, note)
     session.flush()
+    # Локальный импорт: notifications сам импортирует provenance.
+    from modules.knowledge import notifications
+
+    notifications.concept_reviewed(session, concept, before)
     return concept
 
 

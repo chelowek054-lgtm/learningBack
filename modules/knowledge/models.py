@@ -409,7 +409,7 @@ class Notification(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
-    # course_ready | course_extended
+    # course_ready | course_extended | concept_verified | concept_changed
     kind: Mapped[str] = mapped_column(String, nullable=False)
     domain: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
