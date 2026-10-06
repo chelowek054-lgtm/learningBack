@@ -11,6 +11,7 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.db import TS as _ts
@@ -319,3 +320,65 @@ class ReviewLog(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (Index("idx_review_log_target", "target_type", "target_id"),)
+
+
+# ---- слияние понятий (T-0078) ----
+
+EMBEDDING_DIM = 1024
+
+
+class ConceptEmbedding(Base):
+    """Вектор понятия для поиска близких: пересчитывается, когда меняется текст."""
+
+    __tablename__ = "concept_embedding"
+
+    concept_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), primary_key=True
+    )
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    text_hash: Mapped[str] = mapped_column(String, nullable=False)
+    embedding = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (
+        Index(
+            "idx_concept_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class MergeDecision(Base):
+    """Решение модели по паре понятий: повторно за один и тот же вопрос не платим."""
+
+    __tablename__ = "merge_decision"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    pair_key: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # same | refines | different | contradicts
+    verdict: Mapped[str] = mapped_column(String, nullable=False)
+    general: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
+    reason: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class ConceptConflict(Base):
+    """Противоречие между понятиями: очередь специалиста (R-0046), а не молчаливое решение."""
+
+    __tablename__ = "concept_conflict"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    a_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), nullable=False
+    )
+    b_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
+    # open | resolved
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'open'"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("uq_concept_conflict_pair", "a_id", "b_id", unique=True),)

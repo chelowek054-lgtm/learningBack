@@ -108,6 +108,8 @@ def engine():
     eng = create_engine(url, pool_pre_ping=True, future=True)
     # Пересоздаём схему целиком: create_all не эволюционирует существующие таблицы,
     # и добавленная в модель колонка молча не появлялась бы в тестовой базе.
+    with eng.begin() as conn:  # векторные колонки (A-0024): расширение должно быть до create_all
+        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
     Base.metadata.drop_all(eng)
     Base.metadata.create_all(eng)
     yield eng

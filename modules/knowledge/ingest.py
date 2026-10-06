@@ -427,4 +427,10 @@ def ingest_job(session: Session, job: Job, gateway) -> dict[str, Any]:
         raise ValueError("documentId некорректен") from e
     if doc is None:
         raise ValueError("Документ не найден")
-    return ingest(session, doc, gateway)
+    state = ingest(session, doc, gateway)
+    if not state.get("skipped") and state.get("concepts") and doc.domain:
+        # Новые понятия могут дублировать уже стоящие: слияние области идёт следующей задачей.
+        from modules.knowledge import merge
+
+        merge.enqueue_merge(session, doc.domain, job.user_id)
+    return state
