@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -65,6 +65,9 @@ class ConceptEdge(Base):
     to_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("concept.id"), nullable=False)
     # prereq | specializes | part_of | related | contrasts | misconception | example
     type: Mapped[str] = mapped_column(String, nullable=False)
+    # draft — внесено автоматически и не проверено; approved — подтверждено человеком;
+    # rejected — отклонено с причиной (T-0076, R-0044).
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'draft'"))
 
     __table_args__ = (Index("idx_concept_edge_from", "from_id"),)
 
@@ -225,3 +228,94 @@ class ConceptLink(Base):
         Index("uq_concept_link_pair", "from_id", "to_id", unique=True),
         Index("idx_concept_link_to", "to_id"),
     )
+
+
+# ---- происхождение знаний (T-0076, R-0043, R-0044, R-0045) ----
+
+
+class SourceDocument(Base):
+    """Документ-источник: учебник, статья, страница. Файл лежит в объектном хранилище."""
+
+    __tablename__ = "source_document"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    # Ключ файла в объектном хранилище (core.objects); null — файл не сохранялся.
+    object_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Хэш содержимого: повторная загрузка того же файла не плодит дубли.
+    content_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    origin_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    license: Mapped[str | None] = mapped_column(String, nullable=True)
+    domain: Mapped[str | None] = mapped_column(String, nullable=True)
+    level: Mapped[str | None] = mapped_column(String, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    added_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class SourceFragment(Base):
+    """Фрагмент документа: страница и заголовок главы. Ссылка на него — свидетельство утверждения."""
+
+    __tablename__ = "source_fragment"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("source_document.id", ondelete="CASCADE"), nullable=False
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    heading: Mapped[str | None] = mapped_column(String, nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (Index("idx_source_fragment_doc", "document_id", "ordinal"),)
+
+
+class ConceptSource(Base):
+    """Понятие опирается на фрагмент: что именно из него взято (определение, пример, ошибка)."""
+
+    __tablename__ = "concept_source"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    concept_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), nullable=False
+    )
+    fragment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("source_fragment.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'definition'"))
+
+    __table_args__ = (Index("uq_concept_source", "concept_id", "fragment_id", "role", unique=True),)
+
+
+class EdgeSource(Base):
+    """Связь опирается на фрагмент: порядок изложения или прямое утверждение источника."""
+
+    __tablename__ = "edge_source"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    edge_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept_edge.id", ondelete="CASCADE"), nullable=False
+    )
+    fragment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("source_fragment.id", ondelete="CASCADE"), nullable=False
+    )
+
+    __table_args__ = (Index("uq_edge_source", "edge_id", "fragment_id", unique=True),)
+
+
+class ReviewLog(Base):
+    """Решения проверяющих: кто, когда и что сделал с понятием или связью (R-0046)."""
+
+    __tablename__ = "review_log"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # concept | edge
+    target_type: Mapped[str] = mapped_column(String, nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reviewer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    # approve | reject | edit
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_review_log_target", "target_type", "target_id"),)
