@@ -15,6 +15,7 @@ from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.cross_links_api import router as _cross_links_router
 from modules.knowledge.domains_api import router as _domains_router
+from modules.knowledge.provenance_api import router as _provenance_router
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph, resolve_node
 from modules.knowledge.study import (
@@ -39,7 +40,7 @@ from modules.knowledge.material_graph import (
     propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
-from modules.knowledge import events, goal_intake, subdomains
+from modules.knowledge import events, goal_intake, provenance, subdomains
 from modules.knowledge.events import NodeChanged
 from modules.knowledge.schemas import (
     GoalBuildIn,
@@ -69,6 +70,7 @@ from modules.knowledge.schemas import (
 router = APIRouter(prefix="/graph", tags=["graph"])
 router.include_router(_cross_links_router)
 router.include_router(_domains_router)
+router.include_router(_provenance_router)
 
 
 # ---- чтение эффективного графа (COW) ----
@@ -376,13 +378,13 @@ def promote_node(body: PromoteIn, _: CurrentSuperuser, session: SessionDep) -> d
 
 @router.post("/canon/nodes/{concept_id}/approve")
 def approve_node(
-    concept_id: str, body: ApproveNodeIn, _: CurrentSuperuser, session: SessionDep
+    concept_id: str, body: ApproveNodeIn, user: CurrentSuperuser, session: SessionDep
 ) -> dict:
     """Governance: подтвердить draft-узел (status='approved'), опц. закрепить tier."""
     c = session.get(Concept, concept_id)
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "concept не найден")
-    c.status = "approved"
+    provenance.review_concept(session, c, user.id, "approve")  # решение попадает в журнал
     if body.tier is not None:
         c.tier = body.tier
     session.commit()
@@ -525,7 +527,7 @@ def create_course(domain: str, body: CourseIn, user: CurrentUser, session: Sessi
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
     session.commit()
-    return course_view(course)
+    return course_view(course, session)
 
 
 @router.get("/course/{domain}")
@@ -533,7 +535,7 @@ def read_course(domain: str, user: CurrentUser, session: SessionDep) -> dict:
     course = session.query(Course).filter_by(user_id=user.id, domain=domain).one_or_none()
     if course is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "курс не построен")
-    return course_view(course)
+    return course_view(course, session)
 
 
 @router.post("/course/{domain}/complete")
@@ -545,7 +547,7 @@ def complete_step(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "курс не построен")
     mark_completed(session, course, str(body.concept_id))
     session.commit()
-    return course_view(course)
+    return course_view(course, session)
 
 
 # ---- прохождение шага курса (KG5-05) ----

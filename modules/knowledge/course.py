@@ -322,10 +322,23 @@ def _kept_progress(progress: Any, path: list[dict[str, Any]]) -> list[str]:
     return [step["conceptId"] for step in path if step["conceptId"] in done]
 
 
-def course_view(course: Course) -> dict[str, Any]:
-    """Курс для клиента: путь, прогресс и что делать сейчас."""
+def course_view(course: Course, session: Session | None = None) -> dict[str, Any]:
+    """Курс для клиента: путь, прогресс и что делать сейчас.
+
+    С сессией у каждого шага есть статус: «проверено» или «черновик» (R-0044). Статус читается из
+    графа в момент запроса, а не хранится в пути курса: подтверждение специалиста видно сразу.
+    Источников здесь нет и быть не должно: их видят только администраторы (R-0045).
+    """
     completed = set((course.progress or {}).get("completed") or [])
-    steps = [{**step, "done": step["conceptId"] in completed} for step in (course.path or [])]
+    statuses = _statuses(session, [s["conceptId"] for s in (course.path or [])]) if session else {}
+    steps = [
+        {
+            **step,
+            "done": step["conceptId"] in completed,
+            **({"status": statuses[step["conceptId"]]} if step["conceptId"] in statuses else {}),
+        }
+        for step in (course.path or [])
+    ]
     current = next((s for s in steps if not s["done"]), None)
     return {
         "domain": course.domain,
@@ -334,7 +347,17 @@ def course_view(course: Course) -> dict[str, Any]:
         "completed": len(completed),
         "total": len(steps),
         "current": current,
+        "draftSteps": sum(1 for s in steps if s.get("status") == "draft"),
     }
+
+
+def _statuses(session: Session, concept_ids: list[str]) -> dict[str, str]:
+    """concept_id → verified|draft для шагов курса; отклонённое для учащегося тоже «черновик»."""
+    ids = [uuid.UUID(c) for c in concept_ids if c]
+    if not ids:
+        return {}
+    rows = session.query(Concept.id, Concept.status).filter(Concept.id.in_(ids)).all()
+    return {str(cid): ("verified" if st == "approved" else "draft") for cid, st in rows}
 
 
 def mark_completed(session: Session, course: Course, concept_id: str) -> Course:
