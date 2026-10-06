@@ -118,6 +118,13 @@ class Settings(BaseSettings):
     ingest_window_fragments: int = 10
     ingest_max_windows: int = 60
 
+    # Эмбеддинги и слияние понятий (core.embeddings, modules.knowledge.merge).
+    embedding_model: str = "baai/bge-m3"
+    embedding_dim: int = 1024
+    merge_candidates: int = 5
+    merge_min_similarity: float = 0.6
+    merge_max_judgements: int = 200
+
     # Почта (core.mail): любой SMTP. Пусто → письма только в лог (вне production).
     smtp_host: str = ""
     smtp_port: int = 587

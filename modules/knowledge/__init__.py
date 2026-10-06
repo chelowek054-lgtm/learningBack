@@ -128,9 +128,9 @@ class KnowledgeModule(BackendModule):
 
     def job_handlers(self):
         """Разбор документа в понятия идёт фоновой задачей (T-0077), а не на запросе человека."""
-        from modules.knowledge.ingest import JOB_TYPE, ingest_job
+        from modules.knowledge import ingest, merge
 
-        return {JOB_TYPE: ingest_job}
+        return {ingest.JOB_TYPE: ingest.ingest_job, merge.JOB_TYPE: merge.merge_job}
 
 
 backend = KnowledgeModule()
