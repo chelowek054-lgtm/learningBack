@@ -287,3 +287,20 @@ class DataAccessLog(Base):
     at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (Index("idx_data_access_user_at", "user_id", "at"),)
+
+
+class PushDevice(Base):
+    """Устройство человека для push-уведомлений (T-0086). Регистрация — согласие, `enabled` — настройка."""
+
+    __tablename__ = "push_device"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    token: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    platform: Mapped[str] = mapped_column(String, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_push_device_user", "user_id"),)

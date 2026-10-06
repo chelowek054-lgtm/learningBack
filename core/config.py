@@ -137,6 +137,12 @@ class Settings(BaseSettings):
     merge_max_judgements: int = 200
 
     # Почта (core.mail): любой SMTP. Пусто → письма только в лог (вне production).
+    # Push-уведомления (T-0086): expo — через Expo Push (нужна EAS-сборка клиента), off — выключены.
+    push_provider: str = "expo"
+    push_expo_access_token: str = (
+        ""  # необязателен; нужен, если в проекте Expo включена защита push
+    )
+
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
