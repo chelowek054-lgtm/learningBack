@@ -64,6 +64,9 @@ def test_summary_without_any_answers_is_still_possible():
         "goal": "машинное обучение",
         "level": goal_intake.DEFAULT_LEVEL,
         "wishes": [],
+        "knows": "",
+        "constraints": {},
+        "assumed": ["goal", "level", "knows", "constraints"],
     }
 
 
@@ -136,7 +139,15 @@ def test_confirmation_keeps_only_the_summary_not_the_dialog(session, client):
     )
 
     row = session.query(GoalIntake).one()
-    assert set(row.summary) == {"area", "goal", "level", "wishes"}
+    assert set(row.summary) == {
+        "area",
+        "goal",
+        "level",
+        "wishes",
+        "knows",
+        "constraints",
+        "assumed",
+    }
 
 
 def test_reconfirming_replaces_the_previous_summary(session, client):
@@ -246,3 +257,80 @@ def test_curator_is_not_blocked_by_the_dialog(session, client):
     )
 
     assert r.status_code == 200
+
+
+# ---- пять полей цели (T-0074, R-0041) ----
+
+
+def test_five_fields_are_kept_and_nothing_is_assumed_when_all_are_stated():
+    s = goal_intake.clean_summary(
+        {
+            "area": "Английский",
+            "goal": "сдать IELTS",
+            "level": "apply",
+            "knows": "читаю свободно, пишу плохо",
+            "constraints": {"deadline": "через 3 месяца", "hoursPerWeek": 6, "format": "короткие"},
+        },
+        "английский",
+    )
+
+    assert s["knows"] == "читаю свободно, пишу плохо"
+    assert s["constraints"] == {
+        "deadline": "через 3 месяца",
+        "hoursPerWeek": 6,
+        "format": "короткие",
+    }
+    assert s["assumed"] == []
+
+
+def test_unstated_fields_are_listed_as_assumed_not_invented():
+    s = goal_intake.clean_summary({"area": "Python", "goal": "работа"}, "python")
+
+    assert s["knows"] == "" and s["constraints"] == {}
+    assert s["assumed"] == ["level", "knows", "constraints"]  # цель названа, остальное — нет
+
+
+def test_constraints_are_cleaned():
+    cleaned = goal_intake.clean_constraints(
+        {"deadline": "  ", "hoursPerWeek": 500, "format": "видео", "extra": 1}
+    )
+    assert cleaned == {"format": "видео"}  # лишнее, пустое и нереальные часы не хранятся
+    assert goal_intake.clean_constraints({"hoursPerWeek": 7.5}) == {"hoursPerWeek": 7.5}
+    assert goal_intake.clean_constraints({"hoursPerWeek": True}) == {}
+    assert goal_intake.clean_constraints("не словарь") == {}
+
+
+def test_goal_text_carries_what_is_known_and_the_limits_to_the_build():
+    text = goal_intake.as_goal_text(
+        {
+            "area": "Английский",
+            "goal": "сдать IELTS",
+            "wishes": ["письмо"],
+            "knows": "читаю свободно",
+            "constraints": {"deadline": "3 месяца", "hoursPerWeek": 6},
+        }
+    )
+    assert "уже знает: читаю свободно" in text
+    assert "срок 3 месяца" in text and "6 ч в неделю" in text and "важно: письмо" in text
+
+
+def test_old_summaries_without_new_fields_still_load_and_confirm(session, client):
+    api = client(make_user(session))
+    r = api.post("/graph/goal/confirm", json={"domain": "ml", "area": "ML", "goal": "работа"})
+    assert r.status_code == 200
+    assert r.json()["summary"]["assumed"] == ["level", "knows", "constraints"]
+
+
+def test_confirm_accepts_the_five_fields(session, client):
+    api = client(make_user(session))
+    body = {
+        "domain": "ml",
+        "area": "ML",
+        "goal": "работа",
+        "level": "create",
+        "knows": "линейная алгебра",
+        "constraints": {"hoursPerWeek": 4},
+    }
+    summary = api.post("/graph/goal/confirm", json=body).json()["summary"]
+    assert summary["knows"] == "линейная алгебра" and summary["constraints"] == {"hoursPerWeek": 4}
+    assert summary["assumed"] == []

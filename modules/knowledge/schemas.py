@@ -180,5 +180,8 @@ class GoalConfirmIn(BaseModel):
     domain: str = Field(min_length=1)
     area: str = Field(min_length=1)
     goal: str = ""
-    level: str = "apply"
+    # None — человек уровень не выбирал: ставится уровень по умолчанию, и это помечено как «предположили».
+    level: str | None = None
     wishes: list[str] = Field(default_factory=list, max_length=10)
+    knows: str = Field(default="", max_length=300)
+    constraints: dict = Field(default_factory=dict)
