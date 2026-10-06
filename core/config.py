@@ -103,6 +103,15 @@ class Settings(BaseSettings):
     audio_dir: str = ".data/audio"
 
     # Расшифровка речи (порт core.stt). Пустая модель → заглушка. Записи голоса — в voice_dir.
+    # Объектное хранилище источников (core.objects): любой S3-совместимый сервис.
+    # Пусто → хранилище в памяти (разработка и тесты).
+    s3_endpoint: str = ""
+    s3_public_endpoint: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = "praxis-sources"
+    s3_region: str = "us-east-1"
+
     stt_model: str = ""
 
     # Почта (core.mail): любой SMTP. Пусто → письма только в лог (вне production).
