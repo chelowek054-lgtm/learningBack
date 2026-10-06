@@ -1,4 +1,4 @@
-"""Apache AGE и pgvector в базе (T-0072, A-0024, A-0026, V-0092)."""
+"""Apache AGE и pgvector в базе (T-0072, A-0024, A-0026)."""
 
 from __future__ import annotations
 
