@@ -161,6 +161,9 @@ def _payload(
         "conceptVersion": concept.version,
         "title": concept.title,
         "bloom": bloom,
+        # «проверено» или «черновик» (R-0044): экран узла честно помечает непроверенное. Источника
+        # здесь нет и быть не должно (R-0045); статус на момент начала шага.
+        "status": "verified" if concept.status == "approved" else "draft",
     }
     if activity_type == "concept_study":
         return {**base, "content": content.model_dump()}
