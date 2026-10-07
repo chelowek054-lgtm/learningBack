@@ -53,6 +53,17 @@ def _no_live_llm() -> Iterator[None]:
         settings.llm_api_key = saved
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _no_job_threads() -> Iterator[None]:
+    """Тесты исполняют задачи сами и по порядку: поток с отдельной сессией ушёл бы мимо отката теста."""
+    saved = settings.jobs_inline_thread
+    settings.jobs_inline_thread = False
+    try:
+        yield
+    finally:
+        settings.jobs_inline_thread = saved
+
+
 class _UsageSink:
     """Вместо записи в БД стенда складывает строки учёта токенов в список."""
 
