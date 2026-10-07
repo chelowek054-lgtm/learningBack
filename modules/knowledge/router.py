@@ -42,7 +42,7 @@ from modules.knowledge.material_graph import (
     propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
-from modules.knowledge import events, goal_intake, notifications, provenance, subdomains
+from modules.knowledge import events, goal_intake, notifications, provenance, stages, subdomains
 from modules.knowledge.events import NodeChanged
 from modules.knowledge.schemas import (
     GoalBuildIn,
@@ -147,6 +147,7 @@ def _persist_draft(session, domain: str, draft: dict, refresh: bool) -> list[Nod
             source="llm",
             confidence=n.get("confidence", 0.0),
             status="draft",
+            **stages.stage_fields(n),
         )
         session.add(c)
         session.flush()
