@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
+from core.ai_gateway import get_ai_gateway, has_llm
 from core.deps import CurrentUser, SessionDep
 from modules.knowledge import profile_store
 
@@ -50,6 +51,21 @@ def edit_profile(domain: str, body: ProfileIn, user: CurrentUser, session: Sessi
         raise HTTPException(status.HTTP_404_NOT_FOUND, "профиль не построен")
     try:
         profile_store.save_edit(session, row, body.model_dump())
+    except profile_store.ProfileError as e:
+        raise _fail(e) from e
+    session.commit()
+    return profile_store.view(row)
+
+
+@router.post("/profile/{domain}/match")
+def match_profile(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Сопоставить профиль с графом по близости: что уже есть, что спорно, что новое."""
+    row = profile_store.get(session, user.id, domain)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "профиль не построен")
+    try:
+        gateway = get_ai_gateway() if has_llm() else None
+        profile_store.match(session, row, gateway)
     except profile_store.ProfileError as e:
         raise _fail(e) from e
     session.commit()

@@ -135,6 +135,9 @@ class Settings(BaseSettings):
     merge_candidates: int = 5
     merge_min_similarity: float = 0.6
     merge_max_judgements: int = 200
+    # Сопоставление области профиля с реестром (A-0031): от same — «уже есть», от maybe до same — спорно, решает модель.
+    area_same_similarity: float = 0.82
+    area_maybe_similarity: float = 0.70
 
     # Почта (core.mail): любой SMTP. Пусто → письма только в лог (вне production).
     # Push-уведомления (T-0086): expo — через Expo Push (нужна EAS-сборка клиента), off — выключены.
