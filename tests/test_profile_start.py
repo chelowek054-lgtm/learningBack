@@ -41,6 +41,23 @@ def test_job_with_graph_builds_the_skeleton_and_confirms(session):
     assert session.query(Concept).filter_by(domain="ml").count() > 0
 
 
+def test_status_stays_building_until_the_skeleton_is_done(session, monkeypatch):
+    user = make_user(session)
+    confirmed_goal(session, user)
+    row, job = profile_store.request(session, user.id, "ml", with_graph=True)
+    seen = []
+    real = profile_store.profile_build.build_skeleton
+
+    def spy(*a, **k):
+        seen.append(row.status)  # то, что в этот момент увидел бы экран
+        return real(*a, **k)
+
+    monkeypatch.setattr(profile_store.profile_build, "build_skeleton", spy)
+    process_job(session, job, None)
+
+    assert seen == ["building"] and row.status == "confirmed"
+
+
 def test_plain_job_leaves_the_graph_alone(session):
     user = make_user(session)
     confirmed_goal(session, user)

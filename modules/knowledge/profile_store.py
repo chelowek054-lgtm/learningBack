@@ -115,16 +115,20 @@ def profile_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
             row.status, row.error = FAILED, str(exc)[:300]
             session.flush()
         raise
-    row.profile, row.status, row.error = profile, DRAFT, None
+    with_graph = bool((job.input_ref or {}).get("graph"))
+    # Со скелетом статус остаётся «строится» до его конца: иначе экран на секунды видит «черновик» и бросает ход.
+    row.profile, row.status, row.error = profile, BUILDING if with_graph else DRAFT, None
     row.updated_at = datetime.now(timezone.utc)
     session.flush()
     result = {"areas": len(profile["areas"]), "concepts": skill_profile.concept_count(profile)}
-    if (job.input_ref or {}).get("graph"):
+    if with_graph:
         # Профиль сохраняем до скелета: сбой графа не должен стирать минуты работы модели.
         session.commit()
         try:
             with session.begin_nested():
-                report = build_graph(session, row, gateway if has_llm() else None)
+                report = build_graph(
+                    session, row, gateway if has_llm() else None, allow_building=True
+                )
             result["graph"] = {"created": report["created"], "reused": report["reused"]}
         except Exception as exc:  # noqa: BLE001 — профиль цел, человек увидит причину и повторит
             log.warning("Граф по профилю не построен", exc_info=True)
@@ -180,9 +184,11 @@ def save_edit(session: Session, row: SkillProfile, raw: Any) -> SkillProfile:
     return row
 
 
-def match(session: Session, row: SkillProfile, gateway: Any = None) -> dict[str, Any]:
+def match(
+    session: Session, row: SkillProfile, gateway: Any = None, *, allow_building: bool = False
+) -> dict[str, Any]:
     """Сопоставить профиль с графом и сохранить решения в профиле: они видны человеку и потом строят граф."""
-    if row.status == BUILDING or not row.profile:
+    if (row.status == BUILDING and not allow_building) or not row.profile:
         raise ProfileError("not_ready", "Профиль ещё не построен")
     decisions = profile_match.match_profile(session, row.profile, gateway)
     row.profile = {**row.profile, "match": decisions}
@@ -209,12 +215,14 @@ def _queue_sources(session: Session, row: SkillProfile, report: dict[str, Any]) 
     return queued
 
 
-def build_graph(session: Session, row: SkillProfile, gateway: Any = None) -> dict[str, Any]:
+def build_graph(
+    session: Session, row: SkillProfile, gateway: Any = None, *, allow_building: bool = False
+) -> dict[str, Any]:
     """Построить скелет графа по профилю: сопоставить (если ещё не), завести области и понятия."""
-    if row.status == BUILDING or not row.profile:
+    if (row.status == BUILDING and not allow_building) or not row.profile:
         raise ProfileError("not_ready", "Профиль ещё не построен")
     if not (row.profile.get("match") or {}).get("areas"):
-        match(session, row, gateway)
+        match(session, row, gateway, allow_building=allow_building)
     report = profile_build.build_skeleton(
         session, row.domain, row.profile, row.profile.get("match")
     )
