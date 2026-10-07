@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from core.ai_gateway import get_ai_gateway, has_llm
 from core.deps import CurrentUser, SessionDep
-from modules.knowledge import profile_store
+from modules.knowledge import profile_coverage, profile_store
 
 router = APIRouter(tags=["skill-profile"])
 
@@ -70,6 +70,15 @@ def match_profile(domain: str, user: CurrentUser, session: SessionDep) -> dict:
         raise _fail(e) from e
     session.commit()
     return profile_store.view(row)
+
+
+@router.get("/profile/{domain}/coverage")
+def profile_coverage_report(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Чего из профиля в графе уже есть; разбивка по источникам — только администратору."""
+    row = profile_store.get(session, user.id, domain)
+    if row is None or not row.profile:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "профиль не построен")
+    return profile_coverage.report(session, row, admin=user.is_superuser)
 
 
 @router.post("/profile/{domain}/build")
