@@ -369,3 +369,87 @@ def test_job_with_missing_document_fails_for_good(session):
     session.flush()
     process_job(session, bad, FakeGateway([]))
     assert bad.status == "failed"
+
+
+# ---- параллельные окна (T-0100) ----
+
+BIG = "\n\n".join(f"# Раздел {i}\n\n" + (f"Текст раздела {i}. " * 12) for i in range(8))
+
+
+class SlowGateway:
+    """Каждый ответ занимает время; видно, сколько вызовов шло одновременно и в каком порядке они кончили."""
+
+    def __init__(self, delay=0.15, fail_on=None):
+        import threading
+
+        self.delay, self.fail_on = delay, fail_on
+        self.lock = threading.Lock()
+        self.active = self.peak = self.calls = 0
+
+    def structured(self, *args, **kwargs):
+        import time
+
+        with self.lock:
+            self.calls += 1
+            number = self.calls
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+        try:
+            time.sleep(self.delay)
+            if self.fail_on == number:
+                raise RuntimeError("провайдер недоступен")
+            return {"concepts": [], "edges": []}
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
+def test_windows_are_asked_in_parallel_but_saved_in_order(session, store, monkeypatch):
+    import time
+
+    monkeypatch.setattr(settings, "ingest_window_fragments", 1)
+    monkeypatch.setattr(settings, "ingest_parallel", 4)
+    doc = book(session, store, data=BIG.encode())
+    gateway = SlowGateway()
+
+    started = time.monotonic()
+    state = ingest.ingest(session, doc, gateway, store=store)
+    elapsed = time.monotonic() - started
+
+    assert state["status"] == "done" and state["done"] == state["windows"] == gateway.calls == 8
+    assert 2 <= gateway.peak <= 4  # не больше заданного
+    assert elapsed < 8 * gateway.delay * 0.7  # заметно быстрее последовательного
+
+
+def test_one_at_a_time_when_parallelism_is_off(session, store, monkeypatch):
+    monkeypatch.setattr(settings, "ingest_window_fragments", 1)
+    monkeypatch.setattr(settings, "ingest_parallel", 1)
+    doc = book(session, store, data=BIG.encode())
+    gateway = SlowGateway(delay=0.01)
+    ingest.ingest(session, doc, gateway, store=store)
+    assert gateway.peak == 1
+
+
+def test_failure_keeps_earlier_windows_and_resumes_from_the_failed_one(session, store, monkeypatch):
+    monkeypatch.setattr(settings, "ingest_window_fragments", 1)
+    monkeypatch.setattr(settings, "ingest_parallel", 4)
+    doc = book(session, store, data=BIG.encode())
+
+    with pytest.raises(RuntimeError):
+        ingest.ingest(session, doc, SlowGateway(delay=0.02, fail_on=3), store=store)
+    partial = doc.meta["ingest"]
+    assert partial["status"] == "running" and partial["done"] in (2, 3)  # до сбойного — сохранено
+
+    resume = SlowGateway(delay=0.01)
+    state = ingest.ingest(session, doc, resume, store=store)
+    assert state["status"] == "done" and state["done"] == 8
+    assert resume.calls == 8 - partial["done"]  # сделанное не повторяется
+
+
+def test_parallelism_is_capped(session, store, monkeypatch):
+    monkeypatch.setattr(settings, "ingest_window_fragments", 1)
+    monkeypatch.setattr(settings, "ingest_parallel", 100)
+    doc = book(session, store, data=BIG.encode())
+    gateway = SlowGateway(delay=0.05)
+    ingest.ingest(session, doc, gateway, store=store)
+    assert gateway.peak <= ingest.MAX_PARALLEL
