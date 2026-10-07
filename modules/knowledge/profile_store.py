@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.models import Job
-from modules.knowledge import goal_intake, skill_profile
+from modules.knowledge import goal_intake, profile_match, skill_profile
 from modules.knowledge.models import SkillProfile
 
 JOB_TYPE = "skill_profile"
@@ -105,6 +105,17 @@ def save_edit(session: Session, row: SkillProfile, raw: Any) -> SkillProfile:
     row.updated_at = datetime.now(timezone.utc)
     session.flush()
     return row
+
+
+def match(session: Session, row: SkillProfile, gateway: Any = None) -> dict[str, Any]:
+    """Сопоставить профиль с графом и сохранить решения в профиле: они видны человеку и потом строят граф."""
+    if row.status == BUILDING or not row.profile:
+        raise ProfileError("not_ready", "Профиль ещё не построен")
+    decisions = profile_match.match_profile(session, row.profile, gateway)
+    row.profile = {**row.profile, "match": decisions}
+    row.updated_at = datetime.now(timezone.utc)
+    session.flush()
+    return decisions
 
 
 def confirm(session: Session, row: SkillProfile) -> SkillProfile:

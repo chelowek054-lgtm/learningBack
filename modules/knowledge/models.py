@@ -461,3 +461,17 @@ class SkillProfile(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
 
     __table_args__ = (Index("uq_skill_profile_user_domain", "user_id", "domain", unique=True),)
+
+
+class DomainEmbedding(Base):
+    """Вектор области (название, алиасы, названия её понятий): по нему профиль находит «такая область уже есть»."""
+
+    __tablename__ = "domain_embedding"
+
+    domain_key: Mapped[str] = mapped_column(
+        ForeignKey("domain.key", ondelete="CASCADE"), primary_key=True
+    )
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    text_hash: Mapped[str] = mapped_column(String, nullable=False)
+    embedding = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
