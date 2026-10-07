@@ -155,7 +155,14 @@ def build_skeleton(
     decisions = {a["key"]: a for a in (match or {}).get("areas", [])}
     areas = profile.get("areas", [])
     mapped: dict[str, dict[str, Any]] = {}
-    report = {"domains": [], "created": 0, "reused": 0, "edges": 0, "links": 0}
+    report: dict[str, Any] = {
+        "domains": [],
+        "areas": [],
+        "created": 0,
+        "reused": 0,
+        "edges": 0,
+        "links": 0,
+    }
 
     for area in areas:
         decision = decisions.get(area["key"], {})
@@ -173,6 +180,14 @@ def build_skeleton(
         report["edges"] += _link_inside(session, rows, ids, new_keys)
         mapped[area["key"]] = {"domain": domain, "ids": ids, "rows": rows}
         report["domains"].append(domain.title)
+        report["areas"].append(
+            {
+                "key": area["key"],
+                "domain": domain.title,
+                "created": created,
+                "new": decision.get("decision") != profile_match.EXISTING,
+            }
+        )
 
     # области: предпосылки между ними и привязка понятий через границу
     for area in areas:
