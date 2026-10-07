@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     # Разбор документов в граф (modules.knowledge.ingest): размер окна и потолок окон на документ.
     ingest_window_fragments: int = 10
     ingest_max_windows: int = 60
+    # Сколько окон документа спрашивать у модели одновременно (T-0100): дорого ожидание ответа, а не запись.
+    ingest_parallel: int = 4
     max_source_bytes: int = 100 * 1024 * 1024
 
     # Поиск источников (modules.knowledge.source_search, A-0027): скачивать можно только с этих доменов

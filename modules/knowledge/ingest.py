@@ -16,6 +16,7 @@ import io
 import logging
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -47,6 +48,7 @@ EDGE_TYPES = (
     "example",
 )
 MAX_QUOTE = 300
+MAX_PARALLEL = 8  # потолок одновременных запросов к модели на один документ
 MIN_QUOTE = 12
 # Уверенность понятий из источника не выше этого: проверка человеком ещё впереди.
 MAX_CONFIDENCE = 0.8
@@ -381,23 +383,47 @@ def ingest(
     state.setdefault("dropped", 0)
     state["truncated"] = len(windows(fragments, settings.ingest_window_fragments)) > len(plan)
 
-    for number, window in enumerate(plan):
-        if number < state["done"]:
-            continue
-        raw = gateway.structured(
+    def ask(window: list) -> Any:
+        return gateway.structured(
             "submit_concepts",
             "Вернуть понятия и связи, найденные во фрагментах источника.",
             EXTRACT_SCHEMA,
             prompt_for(window, doc.domain, doc.title),
         )
-        cleaned = clean_extraction(raw, window)
-        c, e = save(session, doc.domain, cleaned)
-        state["concepts"] += c
-        state["edges"] += e
-        state["dropped"] += len(cleaned.dropped)
-        state["done"] = number + 1
-        doc.meta = {**meta, "ingest": {**state, "status": "running"}}
-        session.flush()  # прогресс виден и переживёт сбой следующего окна
+
+    pending = [(n, w) for n, w in enumerate(plan) if n >= state["done"]]
+    width = max(1, min(settings.ingest_parallel, MAX_PARALLEL))
+    for start in range(0, len(pending), width):
+        chunk = pending[start : start + width]
+        # Ожидание ответа модели — основное время; окна независимы, поэтому спрашиваем их разом.
+        # В базу пишем строго по порядку и одной сессией: прогресс `done` остаётся непрерывным.
+        answers: list[Any] = []
+        failure: BaseException | None = None
+        if len(chunk) == 1:
+            try:
+                answers.append(ask(chunk[0][1]))
+            except Exception as exc:  # noqa: BLE001
+                failure = exc
+        else:
+            with ThreadPoolExecutor(max_workers=len(chunk)) as pool:
+                futures = [pool.submit(ask, w) for _, w in chunk]
+            for future in futures:
+                try:
+                    answers.append(future.result())
+                except Exception as exc:  # noqa: BLE001
+                    failure = exc
+                    break  # окна после сбойного не сохраняем: повтор продолжит с него
+        for (number, window), raw in zip(chunk, answers, strict=False):
+            cleaned = clean_extraction(raw, window)
+            c, e = save(session, doc.domain, cleaned)
+            state["concepts"] += c
+            state["edges"] += e
+            state["dropped"] += len(cleaned.dropped)
+            state["done"] = number + 1
+            doc.meta = {**meta, "ingest": {**state, "status": "running"}}
+            session.flush()  # прогресс виден и переживёт сбой следующего окна
+        if failure is not None:
+            raise failure
 
     state["status"] = "done"
     doc.meta = {**meta, "ingest": state}
