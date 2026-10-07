@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+import threading
+import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
+from core.ai_gateway import get_ai_gateway, has_llm
 from core.config import settings
 from core.models import Job
 from modules.knowledge import (
@@ -18,6 +22,8 @@ from modules.knowledge import (
     skill_profile,
 )
 from modules.knowledge.models import SkillProfile
+
+log = logging.getLogger(__name__)
 
 JOB_TYPE = "skill_profile"
 BUILDING, DRAFT, CONFIRMED, FAILED = "building", "draft", "confirmed", "failed"
@@ -43,23 +49,44 @@ def view(row: SkillProfile | None) -> dict[str, Any]:
         "concepts": skill_profile.concept_count(row.profile or {}),
         "error": row.error,
         "confirmedAt": row.confirmed_at.isoformat() if row.confirmed_at else None,
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+        "stale": is_stale(row),
     }
 
 
-def request(session: Session, user_id: uuid.UUID, domain: str) -> tuple[SkillProfile, Job]:
-    """Поставить построение профиля по подтверждённой цели; прежний профиль заменяется заново."""
+def is_stale(row: SkillProfile) -> bool:
+    """«Строится», но задача давно не двигалась: процесс перезапустили, и ждать нечего."""
+    if row.status != BUILDING or row.updated_at is None:
+        return False
+    return datetime.now(timezone.utc) - row.updated_at > timedelta(
+        minutes=settings.job_stale_minutes
+    )
+
+
+def request(
+    session: Session, user_id: uuid.UUID, domain: str, *, with_graph: bool = False
+) -> tuple[SkillProfile, Job]:
+    """Поставить построение профиля по подтверждённой цели; прежний профиль заменяется заново.
+
+    `with_graph` — после профиля та же задача строит и скелет графа (онбординг), без второго шага человека.
+    """
     goal = goal_intake.get_confirmed(session, user_id, domain)
     if goal is None:
         raise ProfileError("goal_not_confirmed", "Сначала подтвердите цель")
     row = get(session, user_id, domain)
-    if row is not None and row.status == BUILDING:
+    if row is not None and row.status == BUILDING and not is_stale(row):
         raise ProfileError("already_building", "Профиль уже строится")
     if row is None:
         row = SkillProfile(user_id=user_id, domain=domain)
         session.add(row)
     row.status, row.error, row.confirmed_at = BUILDING, None, None
     row.updated_at = datetime.now(timezone.utc)
-    job = Job(user_id=user_id, type=JOB_TYPE, status="pending", input_ref={"domain": domain})
+    job = Job(
+        user_id=user_id,
+        type=JOB_TYPE,
+        status="pending",
+        input_ref={"domain": domain, "graph": with_graph},
+    )
     session.add(job)
     session.flush()
     return row, job
@@ -71,6 +98,9 @@ def profile_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
     row = get(session, job.user_id, domain) if domain else None
     goal = goal_intake.get_confirmed(session, job.user_id, domain) if domain else None
     if row is None or goal is None:
+        if row is not None:
+            row.status, row.error = FAILED, "Нет подтверждённой цели"
+            session.flush()
         raise ValueError("Нет подтверждённой цели или профиля")
     try:
         summary = goal.summary
@@ -88,13 +118,50 @@ def profile_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
     row.profile, row.status, row.error = profile, DRAFT, None
     row.updated_at = datetime.now(timezone.utc)
     session.flush()
-    return {"areas": len(profile["areas"]), "concepts": skill_profile.concept_count(profile)}
+    result = {"areas": len(profile["areas"]), "concepts": skill_profile.concept_count(profile)}
+    if (job.input_ref or {}).get("graph"):
+        # Профиль сохраняем до скелета: сбой графа не должен стирать минуты работы модели.
+        session.commit()
+        try:
+            with session.begin_nested():
+                report = build_graph(session, row, gateway if has_llm() else None)
+            result["graph"] = {"created": report["created"], "reused": report["reused"]}
+        except Exception as exc:  # noqa: BLE001 — профиль цел, человек увидит причину и повторит
+            log.warning("Граф по профилю не построен", exc_info=True)
+            row.status, row.error = FAILED, f"Профиль готов, граф не построился: {str(exc)[:200]}"
+            session.flush()
+    return result
+
+
+def dispatch(job_id: uuid.UUID) -> None:
+    """Запустить задачу в фоне, не держа запрос: в inline-режиме — потоком, иначе её возьмёт воркер."""
+    if settings.jobs_mode == "inline" and settings.jobs_inline_thread:
+        threading.Thread(target=_run_in_thread, args=(job_id,), daemon=True).start()
+
+
+def _run_in_thread(job_id: uuid.UUID) -> None:
+    """Исполнить задачу своей сессией; временные сбои повторяются с отсрочкой, как в очереди."""
+    from core.db import SessionLocal
+    from core.jobs import process_job
+
+    try:
+        with SessionLocal() as session:
+            job = session.get(Job, job_id)
+            gateway = get_ai_gateway()
+            while job is not None and job.status == "pending":
+                process_job(session, job, gateway)
+                session.commit()
+                if job.status == "pending" and job.retry_after is not None:
+                    time.sleep(
+                        max(0.0, (job.retry_after - datetime.now(timezone.utc)).total_seconds())
+                    )
+    except Exception:  # noqa: BLE001 — поток не должен падать молча без следа
+        log.exception("Фоновая задача профиля упала")
 
 
 def run_now_if_inline(session: Session, job: Job) -> None:
     """Dev-режим: задачи идут при синхронизации, а профиль нужен сразу, поэтому исполняем на запросе."""
     if settings.jobs_mode == "inline":
-        from core.ai_gateway import get_ai_gateway
         from core.jobs import process_job
 
         process_job(session, job, get_ai_gateway())

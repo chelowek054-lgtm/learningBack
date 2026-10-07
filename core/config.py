@@ -189,6 +189,8 @@ class Settings(BaseSettings):
     job_max_attempts: int = 3
     # inline — задачи исполняются на /sync/push (как раньше); worker — их берёт отдельный процесс (scripts/worker.py).
     jobs_mode: str = "inline"
+    # inline-режим: долгую задачу профиля исполняет поток, а не запрос человека (тесты выключают).
+    jobs_inline_thread: bool = True
     # Через сколько минут задачу в running считаем брошенной (воркер упал) и возвращаем в очередь.
     job_stale_minutes: int = 15
     job_retry_backoff_seconds: int = 60
