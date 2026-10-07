@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.config import settings
+from core.ai_base import ProviderError
 from core.embeddings import Embedder, get_embedder
 from modules.knowledge import domains, merge, provenance
 from modules.knowledge.models import Concept, Domain, DomainAlias, DomainEmbedding
@@ -124,8 +125,19 @@ def match_area(
     if exact is not None:
         return {"decision": EXISTING, "domain": exact.key, "similarity": 1.0, "via": VIA_NAME}
     embedder = embedder or get_embedder()
-    embed_domains(session, embedder)
-    vector = embedder.embed([f"{area['title']}. {area.get('summary', '')}".strip()])[0]
+    try:
+        embed_domains(session, embedder)
+        vector = embedder.embed([f"{area['title']}. {area.get('summary', '')}".strip()])[0]
+    except ProviderError:
+        # Векторы недоступны: профиль, на который потрачены минуты модели, не должен пропасть из-за сети.
+        # Область считается новой, решение помечено — человек увидит, что сверка не состоялась.
+        return {
+            "decision": NEW,
+            "domain": None,
+            "similarity": 0.0,
+            "via": VIA_NONE,
+            "unavailable": True,
+        }
     near = _nearest_domain(session, vector)
     if near is None or near[1] < settings.area_maybe_similarity:
         sim = round(near[1], 3) if near else 0.0
@@ -176,8 +188,16 @@ def match_concepts(
             {"key": c["key"], "decision": NEW, "conceptId": None, "similarity": 0.0}
             for c in concepts
         ]
-    merge.embed_concepts(session, existing, embedder)
-    vectors = embedder.embed([f"{c['title']}. {c.get('summary', '')}".strip() for c in concepts])
+    try:
+        merge.embed_concepts(session, existing, embedder)
+        vectors = embedder.embed(
+            [f"{c['title']}. {c.get('summary', '')}".strip() for c in concepts]
+        )
+    except ProviderError:
+        return [
+            {"key": c["key"], "decision": NEW, "conceptId": None, "similarity": 0.0}
+            for c in concepts
+        ]
     out = []
     for c, vec in zip(concepts, vectors, strict=True):
         row = session.execute(
@@ -225,5 +245,6 @@ def match_profile(
             "existing": sum(1 for a in areas if a["decision"] == EXISTING),
             "new": sum(1 for a in areas if a["decision"] == NEW),
             "disputed": sum(1 for a in areas if a.get("disputed")),
+            "unavailable": sum(1 for a in areas if a.get("unavailable")),
         },
     }

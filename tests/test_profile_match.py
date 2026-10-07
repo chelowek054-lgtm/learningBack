@@ -181,7 +181,7 @@ def test_match_profile_collects_decisions_and_summary(registry):
     profile = {"areas": [area("Линейная алгебра"), area("Кулинария")]}
     out = profile_match.match_profile(registry, profile, None, emb)
     assert [a["decision"] for a in out["areas"]] == ["existing", "new"]
-    assert out["summary"] == {"existing": 1, "new": 1, "disputed": 0}
+    assert out["summary"] == {"existing": 1, "new": 1, "disputed": 0, "unavailable": 0}
 
 
 def test_stored_profile_keeps_the_decisions_until_it_is_edited(session, client, monkeypatch):
@@ -206,3 +206,44 @@ def test_stored_profile_keeps_the_decisions_until_it_is_edited(session, client, 
 def test_api_match_requires_a_profile(session, client):
     api = client(make_user(session))
     assert api.post("/graph/profile/ml/match").status_code == 404
+
+
+def test_unavailable_vectors_do_not_break_matching(registry):
+    from core.ai_base import ProviderError
+
+    class Down:
+        model, dim = "down", DIM
+
+        def embed(self, texts):
+            raise ProviderError("Эмбеддинги недоступны")
+
+    profile = {"areas": [area("Кулинария")]}
+    out = profile_match.match_profile(registry, profile, None, Down())
+
+    assert out["areas"][0]["decision"] == "new" and out["areas"][0]["unavailable"] is True
+    assert out["summary"]["unavailable"] == 1
+
+
+def test_unavailable_vectors_make_concepts_new_too(registry):
+    from core.ai_base import ProviderError
+
+    registry.add(
+        Concept(
+            domain="Линейная алгебра",
+            title="Определитель",
+            tier="core",
+            content={},
+            bloom_levels=[],
+        )
+    )
+    registry.flush()
+
+    class Down:
+        model, dim = "down", DIM
+
+        def embed(self, texts):
+            raise ProviderError("нет сети")
+
+    domain = domains.resolve(registry, "Линейная алгебра")
+    found = profile_match.match_concepts(registry, domain, [{"key": "k", "title": "Det"}], Down())
+    assert [(c["key"], c["decision"]) for c in found] == [("k", "new")]
