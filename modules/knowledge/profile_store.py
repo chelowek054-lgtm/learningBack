@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.models import Job
-from modules.knowledge import goal_intake, profile_match, skill_profile
+from modules.knowledge import goal_intake, profile_build, profile_match, skill_profile
 from modules.knowledge.models import SkillProfile
 
 JOB_TYPE = "skill_profile"
@@ -116,6 +116,40 @@ def match(session: Session, row: SkillProfile, gateway: Any = None) -> dict[str,
     row.updated_at = datetime.now(timezone.utc)
     session.flush()
     return decisions
+
+
+def build_graph(session: Session, row: SkillProfile, gateway: Any = None) -> dict[str, Any]:
+    """Построить скелет графа по профилю: сопоставить (если ещё не), завести области и понятия."""
+    if row.status == BUILDING or not row.profile:
+        raise ProfileError("not_ready", "Профиль ещё не построен")
+    if not (row.profile.get("match") or {}).get("areas"):
+        match(session, row, gateway)
+    report = profile_build.build_skeleton(
+        session, row.domain, row.profile, row.profile.get("match")
+    )
+    row.status, row.confirmed_at = CONFIRMED, datetime.now(timezone.utc)
+    session.flush()
+    return report
+
+
+def build_from_goal(
+    session: Session, user_id: uuid.UUID, domain: str, gateway: Any = None
+) -> dict[str, Any]:
+    """Онбординг: профиль по подтверждённой цели → сопоставление → скелет графа, всё на одном запросе."""
+    goal = goal_intake.get_confirmed(session, user_id, domain)
+    if goal is None:
+        raise ProfileError("goal_not_confirmed", "Сначала подтвердите цель")
+    summary = goal.summary
+    row = get(session, user_id, domain)
+    if row is None:
+        row = SkillProfile(user_id=user_id, domain=domain)
+        session.add(row)
+    row.profile = skill_profile.build_profile(
+        summary.get("area") or domain, goal_intake.as_goal_text(summary), summary.get("level")
+    )
+    row.status, row.error = DRAFT, None
+    session.flush()
+    return build_graph(session, row, gateway)
 
 
 def confirm(session: Session, row: SkillProfile) -> SkillProfile:

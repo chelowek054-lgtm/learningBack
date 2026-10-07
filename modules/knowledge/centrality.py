@@ -17,7 +17,9 @@ CORE_THRESHOLD = 0.5
 _DEP_EDGE_TYPES = ("prereq", "specializes")
 
 
-def recompute_centrality(session: Session, domain: str) -> list[dict[str, Any]]:
+def recompute_centrality(
+    session: Session, domain: str, commit: bool = True
+) -> list[dict[str, Any]]:
     """Пересчитать centrality всех узлов домена (нормированный descendant-count) и
     вернуть список с предложением tier='core'."""
     concepts = session.query(Concept).filter(Concept.domain == domain).all()
@@ -55,6 +57,7 @@ def recompute_centrality(session: Session, domain: str) -> list[dict[str, Any]]:
                 "suggestedCore": c.centrality >= CORE_THRESHOLD or c.tier == "core",
             }
         )
-    session.commit()
+    # commit=False — вызов внутри чужой транзакции (построение скелета): коммитит вызывающий.
+    session.commit() if commit else session.flush()
     out.sort(key=lambda x: x["centrality"], reverse=True)
     return out

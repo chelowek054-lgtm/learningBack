@@ -1,10 +1,12 @@
 """CRUD API графа знаний (KG1-03). Эффективный граф (COW), персональный слой,
 канон-курирование, build-draft через AI-gateway. См. 05-knowledge-model."""
 
+import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from core.ai_gateway import get_ai_gateway, has_llm
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
 from core.models import Activity, Material
 from modules.knowledge.ai import build_graph, expand_node
@@ -43,7 +45,15 @@ from modules.knowledge.material_graph import (
     propose_questions,
 )
 from modules.knowledge.models import Concept, ConceptEdge, Course, UserConcept, UserEdge
-from modules.knowledge import events, goal_intake, notifications, provenance, stages, subdomains
+from modules.knowledge import (
+    events,
+    goal_intake,
+    notifications,
+    profile_store,
+    provenance,
+    stages,
+    subdomains,
+)
 from modules.knowledge.events import NodeChanged
 from modules.knowledge.schemas import (
     GoalBuildIn,
@@ -69,6 +79,8 @@ from modules.knowledge.schemas import (
     UserEdgeIn,
     UserNodePatch,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 router.include_router(_cross_links_router)
@@ -208,6 +220,22 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
             "Эта область уже построена — её изменения курирует администратор",
         )
     _require_confirmed_goal(session, user, body.domain)
+    if (
+        not already
+        and not body.refresh
+        and goal_intake.get_confirmed(session, user.id, body.domain)
+    ):
+        # Новая область по подтверждённой цели: полный профиль навыка вместо одного запроса на 8 понятий.
+        try:
+            # Точка сохранения: недостроенный скелет откатывается целиком, а остальное в запросе цело.
+            with session.begin_nested():
+                profile_store.build_from_goal(
+                    session, user.id, body.domain, get_ai_gateway() if has_llm() else None
+                )
+            session.commit()
+            return effective_graph(session, user.id, body.domain)
+        except Exception:  # noqa: BLE001 — профиль не вышел: строим по-старому, а не оставляем без карты
+            log.warning("Профиль навыка не построен, запасной путь", exc_info=True)
     goal = _goal_text(session, user, body.domain, body.topic)
     draft = build_graph(body.domain, goal, body.max_nodes)
     changed = _persist_draft(session, body.domain, draft, body.refresh)

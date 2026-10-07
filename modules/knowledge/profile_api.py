@@ -72,6 +72,21 @@ def match_profile(domain: str, user: CurrentUser, session: SessionDep) -> dict:
     return profile_store.view(row)
 
 
+@router.post("/profile/{domain}/build")
+def build_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Построить скелет графа по профилю: области, этапы, понятия, связи; что уже есть — не дублируется."""
+    row = profile_store.get(session, user.id, domain)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "профиль не построен")
+    try:
+        gateway = get_ai_gateway() if has_llm() else None
+        report = profile_store.build_graph(session, row, gateway)
+    except profile_store.ProfileError as e:
+        raise _fail(e) from e
+    session.commit()
+    return {**profile_store.view(row), "build": report}
+
+
 @router.post("/profile/{domain}/confirm")
 def confirm_profile(domain: str, user: CurrentUser, session: SessionDep) -> dict:
     row = profile_store.get(session, user.id, domain)
