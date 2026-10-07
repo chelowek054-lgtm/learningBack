@@ -157,10 +157,8 @@ def build_graph(session: Session, row: SkillProfile, gateway: Any = None) -> dic
     return report
 
 
-def build_from_goal(
-    session: Session, user_id: uuid.UUID, domain: str, gateway: Any = None
-) -> dict[str, Any]:
-    """Онбординг: профиль по подтверждённой цели → сопоставление → скелет графа, всё на одном запросе."""
+def profile_from_goal(session: Session, user_id: uuid.UUID, domain: str) -> SkillProfile:
+    """Профиль по подтверждённой цели (долгий запрос к модели); граф по нему строится отдельным шагом."""
     goal = goal_intake.get_confirmed(session, user_id, domain)
     if goal is None:
         raise ProfileError("goal_not_confirmed", "Сначала подтвердите цель")
@@ -174,7 +172,14 @@ def build_from_goal(
     )
     row.status, row.error = DRAFT, None
     session.flush()
-    return build_graph(session, row, gateway)
+    return row
+
+
+def build_from_goal(
+    session: Session, user_id: uuid.UUID, domain: str, gateway: Any = None
+) -> dict[str, Any]:
+    """Профиль и скелет графа одним вызовом (тесты, скрипты); запрос онбординга делит их на два шага."""
+    return build_graph(session, profile_from_goal(session, user_id, domain), gateway)
 
 
 def confirm(session: Session, row: SkillProfile) -> SkillProfile:

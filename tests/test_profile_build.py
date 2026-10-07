@@ -232,3 +232,23 @@ def test_api_build_from_a_stored_profile(session, client, monkeypatch):
     api.post("/graph/profile/ml")
     out = api.post("/graph/profile/ml/build").json()
     assert out["status"] == "confirmed" and out["build"]["created"] == 6
+
+
+def test_profile_survives_a_failed_graph_build(session, client, monkeypatch):
+    """Профиль — минуты модели: сбой построения графа его не стирает, карта строится прежним путём."""
+    from modules.knowledge.models import SkillProfile
+
+    monkeypatch.setattr(skill_profile, "has_llm", lambda: False)
+
+    def boom(*a, **k):
+        raise RuntimeError("сеть пропала")
+
+    monkeypatch.setattr(profile_store, "build_graph", boom)
+    user = make_user(session)
+    confirmed(session, user)
+
+    r = client(user).post("/graph/canon/build", json={"domain": "ml", "topic": "Навык"})
+
+    assert r.status_code == 200 and r.json()["nodes"]  # запасной путь дал карту
+    row = session.query(SkillProfile).filter_by(user_id=user.id, domain="ml").one()
+    assert row.status == "draft" and row.profile["areas"]  # профиль на месте, граф можно достроить

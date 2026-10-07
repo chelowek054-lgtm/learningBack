@@ -227,11 +227,13 @@ def build_canon(body: BuildGraphIn, user: CurrentUser, session: SessionDep) -> d
     ):
         # Новая область по подтверждённой цели: полный профиль навыка вместо одного запроса на 8 понятий.
         try:
-            # Точка сохранения: недостроенный скелет откатывается целиком, а остальное в запросе цело.
+            # Шаг 1: профиль — минуты работы модели. Сохраняем сразу, чтобы сбой следующего шага его не стёр:
+            # человек найдёт готовый профиль на экране «Профиль навыка» и построит граф повторно.
+            row = profile_store.profile_from_goal(session, user.id, body.domain)
+            session.commit()
+            # Шаг 2: скелет графа. Точка сохранения откатывает недостроенное целиком.
             with session.begin_nested():
-                profile_store.build_from_goal(
-                    session, user.id, body.domain, get_ai_gateway() if has_llm() else None
-                )
+                profile_store.build_graph(session, row, get_ai_gateway() if has_llm() else None)
             session.commit()
             return effective_graph(session, user.id, body.domain)
         except Exception:  # noqa: BLE001 — профиль не вышел: строим по-старому, а не оставляем без карты
