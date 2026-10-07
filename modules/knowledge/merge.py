@@ -179,6 +179,12 @@ def pick_keeper(session: Session, a: Concept, b: Concept) -> tuple[Concept, Conc
 def merge_into(session: Session, keeper: Concept, loser: Concept, reason: str = "") -> None:
     """Влить `loser` в `keeper`: источники, связи, ссылки людей; запись в журнал."""
     kid, lid = keeper.id, loser.id
+    # Этап и уровень: у понятия без меток берутся метки вливаемого; обязательное остаётся обязательным.
+    if keeper.stage is None and loser.stage is not None:
+        keeper.stage, keeper.stage_order = loser.stage, loser.stage_order
+    if keeper.level is None:
+        keeper.level = loser.level
+    keeper.optional = keeper.optional and loser.optional
     # источники понятия
     for src in session.query(ConceptSource).filter_by(concept_id=lid).all():
         has = (

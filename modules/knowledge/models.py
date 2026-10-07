@@ -9,7 +9,18 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column
@@ -43,6 +54,11 @@ class Concept(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'draft'"))
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    # Этап и уровень сложности (A-0030): метки, а не отдельные сущности. Null — понятие без этапа.
+    stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    stage_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    level: Mapped[str | None] = mapped_column(String, nullable=True)  # basic|middle|advanced
+    optional: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
     __table_args__ = (
         Index("idx_concept_domain_tier", "domain", "tier"),

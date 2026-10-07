@@ -89,6 +89,15 @@ def _step(
     has_misconception: bool = False,
     preferred: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    labels = {
+        k: v
+        for k, v in (
+            ("stage", concept.stage),
+            ("level", concept.level),
+            ("optional", True if concept.optional else None),
+        )
+        if v is not None
+    }
     return {
         "conceptId": str(concept.id),
         "domain": concept.domain,
@@ -97,6 +106,7 @@ def _step(
         "centrality": concept.centrality,
         "bloom": bloom,
         "reason": reason,
+        **labels,
         "activities": _chain(
             concept,
             bloom,
