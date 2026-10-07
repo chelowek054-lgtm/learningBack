@@ -138,6 +138,9 @@ class Settings(BaseSettings):
     # Сопоставление области профиля с реестром (A-0031): от same — «уже есть», от maybe до same — спорно, решает модель.
     area_same_similarity: float = 0.82
     area_maybe_similarity: float = 0.70
+    # Автопоиск источников для новых областей профиля (A-0032): включён ли и сколько источников от разных поставщиков.
+    profile_auto_sources: bool = True
+    profile_min_sources: int = 3
 
     # Почта (core.mail): любой SMTP. Пусто → письма только в лог (вне production).
     # Push-уведомления (T-0086): expo — через Expo Push (нужна EAS-сборка клиента), off — выключены.

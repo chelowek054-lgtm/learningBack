@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.models import Job
-from modules.knowledge import goal_intake, profile_build, profile_match, skill_profile
+from modules.knowledge import (
+    goal_intake,
+    profile_build,
+    profile_match,
+    profile_sources,
+    skill_profile,
+)
 from modules.knowledge.models import SkillProfile
 
 JOB_TYPE = "skill_profile"
@@ -118,6 +124,24 @@ def match(session: Session, row: SkillProfile, gateway: Any = None) -> dict[str,
     return decisions
 
 
+def _queue_sources(session: Session, row: SkillProfile, report: dict[str, Any]) -> list[str]:
+    """Для каждой новой области скелета поставить в фон поиск источников; вернуть области, по которым поставлен."""
+    areas = {a["key"]: a for a in row.profile.get("areas", [])}
+    queued: list[str] = []
+    for item in report["areas"]:
+        area = areas.get(item["key"])
+        if area is None or not item["new"] or not item["created"]:
+            continue
+        queries = profile_sources.queries_for(
+            area["title"],
+            [s["title"] for s in area["stages"]],
+            [c["title"] for c in area["concepts"]],
+        )
+        if profile_sources.enqueue(session, row.user_id, item["domain"], queries):
+            queued.append(item["domain"])
+    return queued
+
+
 def build_graph(session: Session, row: SkillProfile, gateway: Any = None) -> dict[str, Any]:
     """Построить скелет графа по профилю: сопоставить (если ещё не), завести области и понятия."""
     if row.status == BUILDING or not row.profile:
@@ -129,6 +153,7 @@ def build_graph(session: Session, row: SkillProfile, gateway: Any = None) -> dic
     )
     row.status, row.confirmed_at = CONFIRMED, datetime.now(timezone.utc)
     session.flush()
+    report["sources"] = _queue_sources(session, row, report)
     return report
 
 
