@@ -25,7 +25,8 @@ DEFAULT_LEVEL = "apply"
 MAX_AREAS = 8
 MAX_STAGES = 9
 MIN_AREA_CONCEPTS = 4
-PARALLEL_AREAS = 4
+PARALLEL_AREAS = MAX_AREAS  # все области сразу (R-0056)
+KNOWN_AREA_CONCEPTS = 6  # у области «уже владею» — только опорные понятия (R-0055)
 MAX_TEXT = 400
 
 GOAL, FOUNDATION = "goal", "foundation"
@@ -181,6 +182,7 @@ def clean_outline(raw: Any, limit: int = MAX_AREAS) -> list[dict[str, Any]]:
                 "summary": _text(a.get("summary")),
                 "role": GOAL if a.get("role") == GOAL else FOUNDATION,
                 "weight": weight,
+                "known": a.get("known") is True,
                 "prereqs": [str(p) for p in (a.get("prereqs") or [])],
                 "stages": stage_list,
                 "concepts": [],
@@ -210,6 +212,9 @@ def _one_goal(areas: list[dict[str, Any]]) -> None:
         chosen = max(free or areas, key=lambda a: len(a["prereqs"]))
     for a in areas:
         a["role"] = GOAL if a is chosen else FOUNDATION
+        # Область цели «уже владею» быть не может: ради неё всё и затевается.
+        if a["role"] == GOAL:
+            a["known"] = False
 
 
 def clean_concepts(raw: Any, stage_keys: list[str], budget: int) -> list[dict[str, Any]]:
@@ -250,6 +255,12 @@ def area_budget(level: str | None, weight: int, max_weight: int) -> int:
     """Сколько понятий просить у области: самая большая получает полный размер уровня."""
     size = target_size(level)
     return max(MIN_AREA_CONCEPTS, min(size, round(size * weight / max(max_weight, 1))))
+
+
+def concept_budget(area: dict[str, Any], level: str | None, max_weight: int) -> int:
+    """Сколько понятий просить у области: по весу; у области «уже владею» — только опорные."""
+    budget = area_budget(level, area.get("weight", 3), max_weight)
+    return min(budget, KNOWN_AREA_CONCEPTS) if area.get("known") else budget
 
 
 # ---- модель ----
@@ -338,6 +349,12 @@ def propose_concepts(
     if not has_llm():
         return clean_concepts(_fixture_concepts(area), stage_keys, budget)
     stage_lines = "; ".join(f"{s['key']} — {s['title']}" for s in area["stages"]) or "без этапов"
+    known_line = (
+        " Человек уже владеет этой областью: перечисли только опорные понятия, без которых не держится "
+        "следующее, коротко."
+        if area.get("known")
+        else ""
+    )
     raw = get_ai_gateway().structured(
         "submit_concepts",
         "Вернуть понятия области.",
@@ -349,10 +366,19 @@ def propose_concepts(
             f"{budget}. Для каждого: key (snake_case латиницей), title, summary (2–3 предложения: что это и "
             "зачем), stage — key этапа, level (basic / middle / advanced), optional (true для того, что "
             "можно пропустить без ущерба для цели), prereqs — key понятий этой же области, нужных до него "
-            "(без циклов). summary не короче 150 знаков. Порядок: от основ к сложному."
+            "(без циклов). summary не короче 150 знаков. Порядок: от основ к сложному." + known_line
         ),
     )
     return clean_concepts(raw, stage_keys, budget)
+
+
+def build_outline(
+    skill: str, goal_text: str, level: str | None, limit: int = MAX_AREAS
+) -> dict[str, Any]:
+    """Контур без понятий: области и этапы — быстрый запрос, который человек видит и правит до наполнения."""
+    level = level if level in SIZE_BY_LEVEL else DEFAULT_LEVEL
+    areas = propose_outline(skill, goal_text, level, limit)
+    return {"skill": skill, "level": level, "size": target_size(level), "areas": areas}
 
 
 def build_profile(
@@ -365,11 +391,11 @@ def build_profile(
 
     def fill(area: dict[str, Any]) -> list[dict[str, Any]]:
         return propose_concepts(
-            skill, goal_text, level, area, area_budget(level, area["weight"], max_weight)
+            skill, goal_text, level, area, concept_budget(area, level, max_weight)
         )
 
     if len(areas) > 1 and has_llm():
-        with ThreadPoolExecutor(max_workers=PARALLEL_AREAS) as pool:
+        with ThreadPoolExecutor(max_workers=min(PARALLEL_AREAS, len(areas))) as pool:
             results = list(pool.map(fill, areas))
     else:
         results = [fill(a) for a in areas]

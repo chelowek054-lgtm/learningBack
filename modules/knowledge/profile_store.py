@@ -17,6 +17,7 @@ from core.models import Job
 from modules.knowledge import (
     goal_intake,
     profile_build,
+    profile_fill,
     profile_match,
     profile_sources,
     skill_profile,
@@ -26,7 +27,14 @@ from modules.knowledge.models import SkillProfile
 log = logging.getLogger(__name__)
 
 JOB_TYPE = "skill_profile"
-BUILDING, DRAFT, CONFIRMED, FAILED = "building", "draft", "confirmed", "failed"
+BUILDING, OUTLINE, DRAFT, CONFIRMED, FAILED = (
+    "building",
+    "outline",
+    "draft",
+    "confirmed",
+    "failed",
+)
+PHASE_OUTLINE, PHASE_FILL = "outline", "fill"  # две фазы сборки: быстрый контур и наполнение
 
 
 class ProfileError(ValueError):
@@ -51,6 +59,8 @@ def view(row: SkillProfile | None) -> dict[str, Any]:
         "confirmedAt": row.confirmed_at.isoformat() if row.confirmed_at else None,
         "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
         "stale": is_stale(row),
+        # Ход наполнения по областям: waiting / working / done / failed; у остальных статусов его нет.
+        "progress": (row.profile or {}).get("progress"),
     }
 
 
@@ -64,7 +74,12 @@ def is_stale(row: SkillProfile) -> bool:
 
 
 def request(
-    session: Session, user_id: uuid.UUID, domain: str, *, with_graph: bool = False
+    session: Session,
+    user_id: uuid.UUID,
+    domain: str,
+    *,
+    with_graph: bool = False,
+    phase: str | None = None,
 ) -> tuple[SkillProfile, Job]:
     """Поставить построение профиля по подтверждённой цели; прежний профиль заменяется заново.
 
@@ -85,11 +100,56 @@ def request(
         user_id=user_id,
         type=JOB_TYPE,
         status="pending",
-        input_ref={"domain": domain, "graph": with_graph},
+        input_ref={"domain": domain, "graph": with_graph, "phase": phase},
     )
     session.add(job)
     session.flush()
     return row, job
+
+
+def request_fill(session: Session, user_id: uuid.UUID, domain: str) -> tuple[SkillProfile, Job]:
+    """Подтвердить контур и поставить наполнение: «Собрать карту». Повтор после сбоя продолжает с недостающего."""
+    row = get(session, user_id, domain)
+    if row is None or not (row.profile or {}).get("areas"):
+        raise ProfileError("not_ready", "Сначала нужен контур навыка")
+    if row.status == BUILDING and not is_stale(row):
+        raise ProfileError("already_building", "Сборка уже идёт")
+    profile = dict(row.profile)
+    progress = profile.get("progress")
+    # Прерванное наполнение продолжаем, а не стираем; новое — с чистого прогресса.
+    profile["progress"] = progress if progress and row.status in (BUILDING, FAILED) else None
+    profile = {k: v for k, v in profile.items() if v is not None}
+    row.profile = profile
+    row.status, row.error, row.confirmed_at = BUILDING, None, None
+    row.updated_at = datetime.now(timezone.utc)
+    job = Job(
+        user_id=user_id,
+        type=JOB_TYPE,
+        status="pending",
+        input_ref={"domain": domain, "graph": True, "phase": PHASE_FILL},
+    )
+    session.add(job)
+    session.flush()
+    return row, job
+
+
+def resume_interrupted(session: Session) -> int:
+    """После перезапуска вернуть в работу сборки, чей процесс умер (inline-режим: поток жил в API)."""
+    jobs = (
+        session.query(Job)
+        .filter(Job.type == JOB_TYPE, Job.status.in_(("pending", "running")))
+        .all()
+    )
+    resumed = 0
+    for job in jobs:
+        row = get(session, job.user_id, (job.input_ref or {}).get("domain") or "")
+        if row is None or row.status != BUILDING:
+            continue
+        job.status, job.retry_after = "pending", None
+        session.flush()
+        dispatch(job.id)
+        resumed += 1
+    return resumed
 
 
 def profile_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
@@ -102,9 +162,15 @@ def profile_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
             row.status, row.error = FAILED, "Нет подтверждённой цели"
             session.flush()
         raise ValueError("Нет подтверждённой цели или профиля")
+    phase = (job.input_ref or {}).get("phase")
+    if phase == PHASE_FILL:
+        return _fill_job(session, job, row, gateway)
     try:
         summary = goal.summary
-        profile = skill_profile.build_profile(
+        build = (
+            skill_profile.build_outline if phase == PHASE_OUTLINE else skill_profile.build_profile
+        )
+        profile = build(
             summary.get("area") or domain,
             goal_intake.as_goal_text(summary),
             summary.get("level"),
@@ -115,6 +181,12 @@ def profile_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
             row.status, row.error = FAILED, str(exc)[:300]
             session.flush()
         raise
+    if phase == PHASE_OUTLINE:
+        # Контур готов: человек смотрит и правит, наполнение начнётся только по «Собрать карту».
+        row.profile, row.status, row.error = profile, OUTLINE, None
+        row.updated_at = datetime.now(timezone.utc)
+        session.flush()
+        return {"areas": len(profile["areas"]), "phase": PHASE_OUTLINE}
     with_graph = bool((job.input_ref or {}).get("graph"))
     # Со скелетом статус остаётся «строится» до его конца: иначе экран на секунды видит «черновик» и бросает ход.
     row.profile, row.status, row.error = profile, BUILDING if with_graph else DRAFT, None
@@ -135,6 +207,24 @@ def profile_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
             row.status, row.error = FAILED, f"Профиль готов, граф не построился: {str(exc)[:200]}"
             session.flush()
     return result
+
+
+def _fill_job(session: Session, job: Job, row: SkillProfile, gateway: Any) -> dict[str, Any]:
+    """Наполнение подтверждённого контура по областям параллельно, затем скелет графа целиком."""
+    try:
+        failed = profile_fill.fill_profile(
+            session, row, profile_fill.goal_text_for(session, row), gateway
+        )
+        if failed:
+            raise RuntimeError("Не удалось составить: " + ", ".join(failed))
+        report = build_graph(session, row, gateway if has_llm() else None, allow_building=True)
+    except Exception as exc:  # noqa: BLE001
+        # Сделанное сохранено в профиле; повтор продолжит с недостающих областей.
+        if job.attempts >= settings.job_max_attempts:
+            row.status, row.error = FAILED, str(exc)[:300]
+            session.flush()
+        raise
+    return {"created": report["created"], "reused": report["reused"]}
 
 
 def dispatch(job_id: uuid.UUID) -> None:
@@ -178,7 +268,9 @@ def save_edit(session: Session, row: SkillProfile, raw: Any) -> SkillProfile:
     cleaned = skill_profile.clean_profile(raw)
     if not cleaned["areas"]:
         raise ProfileError("empty", "В профиле не осталось ни одной области")
-    row.profile, row.status, row.confirmed_at = cleaned, DRAFT, None
+    # Контур, ещё не наполненный, остаётся контуром: правка не превращает его в готовый профиль.
+    row.profile, row.confirmed_at = cleaned, None
+    row.status = OUTLINE if row.status == OUTLINE else DRAFT
     row.updated_at = datetime.now(timezone.utc)
     session.flush()
     return row
@@ -203,7 +295,10 @@ def _queue_sources(session: Session, row: SkillProfile, report: dict[str, Any]) 
     queued: list[str] = []
     for item in report["areas"]:
         area = areas.get(item["key"])
-        if area is None or not item["new"] or not item["created"]:
+        made = item["created"] + (row.profile.get("progress") or {}).get("created", {}).get(
+            item["key"], 0
+        )
+        if area is None or not item["new"] or not made:
             continue
         queries = profile_sources.queries_for(
             area["title"],
