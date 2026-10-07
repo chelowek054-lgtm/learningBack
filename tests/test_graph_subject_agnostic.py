@@ -96,7 +96,9 @@ def test_graph_course_and_placement_work_for_any_subject(session, client, domain
     probe = api.get(f"/graph/placement/{domain}/probe?target=understand").json()
     course = api.post(f"/graph/course/{domain}", json={"bloom": "apply"})
 
-    assert len(graph["nodes"]) == 6 and len(graph["edges"]) == 6
+    assert (
+        len(graph["nodes"]) == 3 and len(graph["edges"]) == 2
+    )  # профиль-заглушка: три этапа цепочкой
     assert probe.get("conceptId") or probe.get("done")  # граница найдена или честно исчерпана
     assert course.status_code in (200, 201), course.text
     assert course.json()["total"] >= 1

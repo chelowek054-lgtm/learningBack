@@ -13,7 +13,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from modules.knowledge import cross_links, domains, profile_match, stages
+from modules.knowledge import cross_links, domains, profile_match, skill_profile, stages
 from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.models import Concept, ConceptEdge, Domain
 
@@ -38,8 +38,9 @@ def _target_domain(
         found = session.get(Domain, decision["domain"])
         if found is not None:
             return found
-    title = goal_domain if area["role"] == "goal" else area["title"]
-    foundation = area["role"] == "foundation" and not area["prereqs"]
+    is_goal = area["role"] == skill_profile.GOAL
+    title = goal_domain if is_goal else area["title"]
+    foundation = not is_goal and not area["prereqs"]
     domain, _ = domains.register(session, title, foundation=foundation)
     return domain
 

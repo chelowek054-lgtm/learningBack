@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from modules.knowledge import domains, profile_match, provenance
+from modules.knowledge import domains, profile_match, provenance, skill_profile
 from modules.knowledge.models import Concept, ConceptSource, Domain, SkillProfile
 
 MISSING_LIMIT = 50  # сколько недостающих названий отдавать по области
@@ -28,7 +28,8 @@ def _domain_title(session: Session, row: SkillProfile, area: dict[str, Any]) -> 
             found = session.get(Domain, decision.get("domain"))
             if found is not None:
                 return found.title
-    return row.domain if area["role"] == "goal" else area["title"]
+    is_goal = area["role"] == skill_profile.GOAL
+    return row.domain if is_goal else area["title"]
 
 
 def _sourced(session: Session, concept_ids: list[Any]) -> set[Any]:

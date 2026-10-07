@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from modules.knowledge import ai, goal_intake, router, subdomains
+from modules.knowledge import skill_profile, goal_intake, router, subdomains
 from modules.knowledge.goal_intake import GoalIntakeError
 from modules.knowledge.models import Concept, GoalIntake
 from tests.conftest import make_user
@@ -239,11 +239,14 @@ def test_confirmed_summary_is_the_input_of_the_build(session, client, monkeypatc
 def test_canon_build_also_receives_the_confirmed_goal(session, client, monkeypatch):
     seen: list[str] = []
 
-    def fake(domain, topic, max_nodes=8):
-        seen.append(topic)
-        return ai._fixture_graph(topic)
+    real = skill_profile.build_profile
 
-    monkeypatch.setattr(router, "build_graph", fake)
+    def fake(skill, goal_text, level, limit=skill_profile.MAX_AREAS):
+        # Новая область строится по профилю навыка (T-0090): подтверждённая цель идёт в него.
+        seen.append(goal_text)
+        return real(skill, goal_text, level, limit)
+
+    monkeypatch.setattr(skill_profile, "build_profile", fake)
     api = client(make_user(session))
     api.post("/graph/goal/confirm", json={"domain": "ml", "area": "ML", "goal": "работа"})
 
