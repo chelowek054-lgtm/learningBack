@@ -436,3 +436,28 @@ class Notification(Base):
     read_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
 
     __table_args__ = (Index("idx_notification_user_unread", "user_id", "read_at"),)
+
+
+class SkillProfile(Base):
+    """Профиль навыка человека по цели: области, этапы, понятия (T-0088, R-0048).
+
+    Строится фоновой задачей, поэтому есть статус: building → draft (человек смотрит и правит) →
+    confirmed (по нему строится граф) либо failed. Один профиль на человека и область.
+    """
+
+    __tablename__ = "skill_profile"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    domain: Mapped[str] = mapped_column(String, nullable=False)
+    # building | draft | confirmed | failed
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'building'"))
+    profile: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    confirmed_at: Mapped[datetime | None] = mapped_column(_ts, nullable=True)
+
+    __table_args__ = (Index("uq_skill_profile_user_domain", "user_id", "domain", unique=True),)
