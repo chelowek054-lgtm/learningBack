@@ -39,6 +39,14 @@ async def lifespan(_: FastAPI):
             session.commit()
         if added:
             log.info("Добавлено рубрик: %s", added)
+        with SessionLocal() as session:
+            from modules.knowledge import profile_store
+
+            # Сборка, прерванная перезапуском, продолжается сама, без повторного нажатия (T-0104).
+            resumed = profile_store.resume_interrupted(session)
+            session.commit()
+        if resumed:
+            log.info("Возобновлено сборок профиля: %s", resumed)
     except Exception:  # noqa: BLE001
         log.warning("Не удалось синхронизировать рубрики при старте", exc_info=True)
     yield

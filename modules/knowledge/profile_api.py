@@ -40,10 +40,26 @@ def build_profile(domain: str, user: CurrentUser, session: SessionDep) -> dict:
 
 
 @router.post("/profile/{domain}/start", status_code=status.HTTP_202_ACCEPTED)
-def start_profile_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
-    """Собрать граф по цели в фоне: профиль, затем скелет. Ответ сразу; ход — GET /profile/{domain}."""
+def start_profile_outline(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Быстрый контур навыка по цели: области и этапы. Дальше человек правит его и просит «собрать карту»."""
     try:
-        row, job = profile_store.request(session, user.id, domain, with_graph=True)
+        row, job = profile_store.request(
+            session, user.id, domain, phase=profile_store.PHASE_OUTLINE
+        )
+    except profile_store.ProfileError as e:
+        raise _fail(e) from e
+    job_id = job.id
+    session.commit()
+    profile_store.dispatch(job_id)
+    session.refresh(row)
+    return profile_store.view(row)
+
+
+@router.post("/profile/{domain}/fill", status_code=status.HTTP_202_ACCEPTED)
+def fill_profile_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+    """Подтвердить контур и собрать карту в фоне: понятия по областям параллельно, затем граф."""
+    try:
+        row, job = profile_store.request_fill(session, user.id, domain)
     except profile_store.ProfileError as e:
         raise _fail(e) from e
     job_id = job.id
