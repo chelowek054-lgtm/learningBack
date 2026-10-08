@@ -175,7 +175,10 @@ class CourseAdmin(ModelView, model=Course):
     column_list = [Course.user_id, Course.domain, Course.created_at]
 
 
+from modules.knowledge.graph_admin import GraphAdmin  # noqa: E402
+
 VIEWS = [
+    GraphAdmin,
     ConceptAdmin,
     ConceptEdgeAdmin,
     UserConceptAdmin,

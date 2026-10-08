@@ -1,0 +1,333 @@
+{% extends "sqladmin/layout.html" %}
+{% block content %}
+<style>
+  .gx-bar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; margin-bottom:.75rem; }
+  .gx-bar .btn-group .btn.active { background:#206bc4; color:#fff; border-color:#206bc4; }
+  .gx-legend { display:flex; flex-wrap:wrap; gap:1rem; font-size:.8rem; margin-bottom:.5rem; color:#667085; align-items:center; }
+  .gx-dot { display:inline-block; width:.8rem; height:.8rem; border-radius:50%; margin-right:.3rem; vertical-align:-1px; }
+  .gx-wrap { display:flex; gap:1rem; align-items:flex-start; }
+  #gx-canvas, #gx-3d { flex:1; height:72vh; border:1px solid #dce1e7; border-radius:6px; background:#fafbfc; min-width:0; }
+  #gx-3d { display:none; }
+  #gx-card { width:340px; max-height:72vh; overflow:auto; border:1px solid #dce1e7; border-radius:6px; padding:.75rem; background:#fff; }
+  #gx-card label { font-size:.75rem; color:#667085; margin:.5rem 0 .1rem; display:block; }
+  #gx-card .form-control, #gx-card .form-select { padding:.2rem .4rem; font-size:.85rem; }
+  .gx-nb { font-size:.8rem; display:flex; justify-content:space-between; gap:.5rem; border-bottom:1px solid #eef0f3; padding:.2rem 0; }
+  .gx-msg { font-size:.8rem; margin-top:.5rem; }
+  .gx-msg.err { color:#d63939; } .gx-msg.ok { color:#2fb344; }
+  .gx-chip { cursor:pointer; padding:0 .4rem; border:1px solid #dce1e7; border-radius:10px; }
+  .gx-chip.off { opacity:.4; text-decoration:line-through; }
+</style>
+
+<div class="card"><div class="card-body">
+  <div class="gx-bar">
+    <div class="btn-group" id="gx-views">
+      <button class="btn btn-sm active" data-view="area">Область</button>
+      <button class="btn btn-sm" data-view="areas">Области</button>
+      <button class="btn btn-sm" data-view="bridges">Связи между областями</button>
+    </div>
+    <select id="gx-domain" class="form-select form-select-sm" style="width:auto;max-width:280px"></select>
+    <div class="btn-group" id="gx-dim">
+      <button class="btn btn-sm active" data-dim="2d">2D</button>
+      <button class="btn btn-sm" data-dim="3d">3D</button>
+    </div>
+    <div class="btn-group" id="gx-layout">
+      <button class="btn btn-sm active" data-layout="tree">Дерево</button>
+      <button class="btn btn-sm" data-layout="graph">Граф</button>
+    </div>
+    <input id="gx-search" class="form-control form-control-sm" style="width:200px" placeholder="Поиск по названию">
+    <label class="form-check form-check-inline m-0"><input type="checkbox" class="form-check-input" id="f-draft"> черновики</label>
+    <label class="form-check form-check-inline m-0"><input type="checkbox" class="form-check-input" id="f-optional"> необязательные</label>
+    <label class="form-check form-check-inline m-0"><input type="checkbox" class="form-check-input" id="f-nosrc"> без источника</label>
+    <span class="ms-auto d-flex gap-1 align-items-center">
+      <select id="gx-edge-type" class="form-select form-select-sm" style="width:auto">
+        <option>prereq</option><option>specializes</option><option>part_of</option><option>related</option>
+        <option>contrasts</option><option>misconception</option><option>example</option>
+      </select>
+      <button class="btn btn-sm" id="gx-add-edge">Добавить связь</button>
+    </span>
+  </div>
+
+  <div class="gx-legend">
+    <span><i class="gx-dot" style="background:#f59f00"></i>черновик</span>
+    <span><i class="gx-dot" style="background:#2fb344"></i>подтверждено</span>
+    <span><i class="gx-dot" style="background:#d63939"></i>отклонено</span>
+    <span>размер — центральность</span>
+    <span>пунктирный контур — необязательное</span>
+    <span>серая рамка — нет источника</span>
+    <span>цвет линии: предпосылка — тёмная, мост между областями — синяя</span>
+    <span id="gx-stages"></span>
+    <span id="gx-info" class="ms-auto"></span>
+  </div>
+
+  <div class="gx-wrap">
+    <div id="gx-canvas"></div>
+    <div id="gx-3d"></div>
+    <div id="gx-card"><span class="text-muted">Нажмите на узел, чтобы увидеть и поправить его.</span></div>
+  </div>
+</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/3d-force-graph@1.73.4/dist/3d-force-graph.min.js"></script>
+<script>
+(function () {
+  const base = location.pathname.replace(/\/$/, '') + '/api';
+  const COLOR = { draft: '#f59f00', approved: '#2fb344', rejected: '#d63939' };
+  const st = { view: 'area', dim: '2d', layout: 'tree', data: null, cy: null, fg: null,
+               addEdge: false, src: null, hiddenStages: new Set(), selected: null };
+  const $ = (id) => document.getElementById(id);
+
+  async function api(path, opts) {
+    const r = await fetch(base + path, Object.assign({ credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' } }, opts || {}));
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.message || ('Ошибка ' + r.status));
+    return body;
+  }
+  const post = (path, payload) => api(path, { method: 'POST', body: JSON.stringify(payload || {}) });
+
+  // ---------- данные ----------
+  async function load() {
+    const domain = $('gx-domain').value;
+    let d;
+    if (st.view === 'areas') d = await api('/areas');
+    else if (st.view === 'bridges') d = await api('/bridges?domain=' + encodeURIComponent(domain));
+    else d = await api('/area?domain=' + encodeURIComponent(domain));
+    st.data = d;
+    st.hiddenStages = new Set();
+    render();
+  }
+
+  function visible(n) {
+    if (st.view === 'areas') return true;
+    if ($('f-draft').checked && n.status !== 'draft') return false;
+    if ($('f-optional').checked && !n.optional) return false;
+    if ($('f-nosrc').checked && n.sources > 0) return false;
+    if (n.stage && st.hiddenStages.has(n.stage)) return false;
+    return true;
+  }
+
+  function elements() {
+    const d = st.data; const els = [];
+    if (st.view === 'areas') {
+      d.nodes.forEach((n) => els.push({ data: { id: n.id, label: n.title + ' (' + n.concepts + ')',
+        status: n.drafts ? 'draft' : 'approved', size: 24 + Math.min(n.concepts, 60), found: n.foundation } }));
+      d.edges.forEach((e, i) => els.push({ data: { id: 'a' + i, source: e.from, target: e.to, type: 'prereq' } }));
+      return els;
+    }
+    const keep = new Set();
+    d.nodes.filter(visible).forEach((n) => { keep.add(n.id); els.push({ data: {
+      id: n.id, label: n.title, status: n.status, optional: n.optional ? 1 : 0, nosrc: n.sources ? 0 : 1,
+      size: 18 + (n.centrality || 0) * 40, stage: n.stage, stageOrder: n.stageOrder, domain: n.domain } }); });
+    d.edges.forEach((e) => { if (keep.has(e.from) && keep.has(e.to)) els.push({ data: {
+      id: 'e' + e.id, eid: e.id, source: e.from, target: e.to, type: e.type, estatus: e.status || '' } }); });
+    return els;
+  }
+
+  // ---------- 2D ----------
+  const STYLE = [
+    { selector: 'node', style: { label: 'data(label)', 'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': 120,
+      'background-color': (n) => COLOR[n.data('status')] || '#8b95a5', width: 'data(size)', height: 'data(size)',
+      'border-width': 1, 'border-color': '#fff', color: '#1d273b', 'text-valign': 'bottom', 'text-margin-y': 3 } },
+    { selector: 'node[optional = 1]', style: { 'border-style': 'dashed', 'border-color': '#667085', 'border-width': 2 } },
+    { selector: 'node[nosrc = 1]', style: { 'border-color': '#9aa3b2' } },
+    { selector: 'edge', style: { width: 1.5, 'line-color': '#475467', 'target-arrow-color': '#475467',
+      'target-arrow-shape': 'triangle', 'curve-style': 'bezier', opacity: 0.8 } },
+    { selector: 'edge[type != "prereq"]', style: { 'line-style': 'dashed', 'line-color': '#7b9fd8', 'target-arrow-color': '#7b9fd8' } },
+    { selector: 'edge[type = "bridge"]', style: { 'line-color': '#206bc4', 'target-arrow-color': '#206bc4', 'line-style': 'solid', width: 2.5 } },
+    { selector: 'edge[estatus = "rejected"]', style: { 'line-color': '#d63939', 'line-style': 'dotted' } },
+    { selector: '.faded', style: { opacity: 0.12 } },
+    { selector: ':selected', style: { 'border-color': '#206bc4', 'border-width': 4 } },
+    { selector: '.src', style: { 'border-color': '#d6336c', 'border-width': 4 } },
+  ];
+
+  function layoutTree(cy) {
+    const cols = new Map();
+    cy.nodes().forEach((n) => {
+      const key = n.data('stageOrder') == null ? 9999 : n.data('stageOrder');
+      if (!cols.has(key)) cols.set(key, []);
+      cols.get(key).push(n);
+    });
+    const keys = [...cols.keys()].sort((a, b) => a - b);
+    keys.forEach((k, ci) => {
+      cols.get(k).sort((a, b) => b.data('size') - a.data('size')).forEach((n, ri) =>
+        n.position({ x: ci * 240, y: ri * 56 }));
+    });
+    cy.fit(undefined, 30);
+  }
+
+  function render2d() {
+    $('gx-3d').style.display = 'none'; $('gx-canvas').style.display = 'block';
+    if (st.fg) { st.fg._destructor && st.fg._destructor(); st.fg = null; $('gx-3d').innerHTML = ''; }
+    if (st.cy) st.cy.destroy();
+    st.cy = cytoscape({ container: $('gx-canvas'), elements: elements(), style: STYLE, wheelSensitivity: 0.25 });
+    const cy = st.cy;
+    if (st.layout === 'tree' && st.view === 'area') layoutTree(cy);
+    else cy.layout({ name: st.view === 'areas' ? 'breadthfirst' : 'cose', animate: false, directed: true, padding: 30 }).run();
+    cy.on('tap', 'node', (ev) => onNode(ev.target.id()));
+    cy.on('tap', 'edge', (ev) => { const e = ev.target; if (e.data('eid')) editEdge(e.data('eid'), e.data('type'), e.data('estatus')); });
+    cy.on('mouseover', 'node', (ev) => { const nb = ev.target.closedNeighborhood();
+      cy.elements().not(nb).addClass('faded'); });
+    cy.on('mouseout', 'node', () => cy.elements().removeClass('faded'));
+    applySearch();
+  }
+
+  // ---------- 3D ----------
+  function render3d() {
+    $('gx-canvas').style.display = 'none'; $('gx-3d').style.display = 'block';
+    if (st.cy) { st.cy.destroy(); st.cy = null; }
+    const els = elements();
+    const nodes = els.filter((e) => !e.data.source).map((e) => ({ id: e.data.id, name: e.data.label,
+      color: COLOR[e.data.status] || '#8b95a5', val: e.data.size / 8 }));
+    const links = els.filter((e) => e.data.source).map((e) => ({ source: e.data.source, target: e.data.target }));
+    if (!st.fg) st.fg = ForceGraph3D()($('gx-3d'));
+    st.fg.width($('gx-3d').clientWidth).height($('gx-3d').clientHeight).graphData({ nodes, links })
+      .nodeLabel('name').nodeColor('color').nodeVal('val').linkDirectionalArrowLength(3)
+      .onNodeClick((n) => onNode(n.id));
+  }
+
+  function renderStages() {
+    const box = $('gx-stages'); box.innerHTML = '';
+    if (st.view === 'areas' || !st.data.stages) return;
+    st.data.stages.forEach((s) => {
+      const chip = document.createElement('span');
+      chip.className = 'gx-chip' + (st.hiddenStages.has(s.title) ? ' off' : '');
+      chip.textContent = s.order + '. ' + s.title;
+      chip.title = 'Свернуть или показать этап';
+      chip.onclick = () => { st.hiddenStages.has(s.title) ? st.hiddenStages.delete(s.title) : st.hiddenStages.add(s.title); render(); };
+      box.appendChild(chip);
+    });
+  }
+
+  function render() {
+    const nodes = st.data.nodes.length;
+    $('gx-info').textContent = nodes + ' узлов, ' + st.data.edges.length + ' связей';
+    renderStages();
+    st.dim === '3d' ? render3d() : render2d();
+  }
+
+  function applySearch() {
+    if (!st.cy) return;
+    const q = $('gx-search').value.trim().toLowerCase();
+    st.cy.nodes().forEach((n) => {
+      const hit = !q || String(n.data('label')).toLowerCase().includes(q);
+      n.style('opacity', hit ? 1 : 0.15);
+    });
+  }
+
+  // ---------- карточка и правки ----------
+  function msg(text, ok) {
+    const m = document.querySelector('#gx-card .gx-msg');
+    if (m) { m.textContent = text; m.className = 'gx-msg ' + (ok ? 'ok' : 'err'); }
+  }
+
+  async function onNode(id) {
+    if (st.view === 'areas') { $('gx-domain').value = st.data.nodes.find((n) => n.id === id)?.title || $('gx-domain').value; return; }
+    if (st.addEdge) {
+      if (!st.src) { st.src = id; st.cy && st.cy.getElementById(id).addClass('src'); msg('Теперь выберите понятие, на которое ведёт связь', true); return; }
+      try {
+        await post('/edge', { from: st.src, to: id, type: $('gx-edge-type').value });
+        st.addEdge = false; st.src = null; $('gx-add-edge').classList.remove('active');
+        await load(); msg('Связь добавлена', true);
+      } catch (e) { st.src = null; st.cy && st.cy.nodes().removeClass('src'); alert(e.message); }
+      return;
+    }
+    st.selected = id;
+    showCard(await api('/node/' + id));
+  }
+
+  function field(label, input) {
+    const wrap = document.createElement('div');
+    const l = document.createElement('label'); l.textContent = label;
+    wrap.append(l, input); return wrap;
+  }
+  function inp(value, tag) { const e = document.createElement(tag || 'input'); e.className = 'form-control'; e.value = value ?? ''; return e; }
+  function sel(options, value) {
+    const e = document.createElement('select'); e.className = 'form-select';
+    options.forEach((o) => { const x = document.createElement('option'); x.value = o; x.textContent = o || '—'; if (o === value) x.selected = true; e.appendChild(x); });
+    return e;
+  }
+
+  function showCard(c) {
+    const box = $('gx-card'); box.innerHTML = '';
+    const h = document.createElement('div'); h.className = 'fw-bold'; h.textContent = c.domain + ' · v' + c.version; box.appendChild(h);
+    const t = inp(c.title), s = inp(c.summary, 'textarea'); s.rows = 5;
+    const tier = sel(['core', 'derived'], c.tier), stg = inp(c.stage), ord = inp(c.stageOrder);
+    const lvl = sel(['', 'basic', 'middle', 'advanced'], c.level || '');
+    const opt = document.createElement('input'); opt.type = 'checkbox'; opt.checked = c.optional; opt.className = 'form-check-input';
+    box.append(field('Название', t), field('Пояснение', s), field('Тир', tier), field('Этап', stg),
+      field('Номер этапа', ord), field('Уровень', lvl), field('Необязательное', opt));
+    const info = document.createElement('div'); info.className = 'gx-msg text-muted';
+    info.textContent = 'Статус: ' + c.status + ' · центральность ' + c.centrality + ' · источников ' + c.sources + (c.hasTheory ? ' · есть теория' : ' · теории нет');
+    box.appendChild(info);
+    const bar = document.createElement('div'); bar.className = 'd-flex flex-wrap gap-1 mt-2';
+    const mk = (text, fn, cls) => { const b = document.createElement('button'); b.className = 'btn btn-sm ' + (cls || ''); b.textContent = text; b.onclick = fn; bar.appendChild(b); };
+    const save = async (extra) => {
+      try {
+        const body = Object.assign({ title: t.value, summary: s.value, tier: tier.value, stage: stg.value,
+          stageOrder: ord.value, level: lvl.value, optional: opt.checked }, extra || {});
+        const next = await post('/node/' + c.id, body); await load(); showCard(next); msg('Сохранено', true);
+      } catch (e) { msg(e.message, false); }
+    };
+    mk('Сохранить', () => save(), 'btn-primary');
+    mk('Подтвердить', () => save({ status: 'approved' }), 'btn-success');
+    mk('В черновик', () => save({ status: 'draft' }));
+    mk('Отклонить', () => { const note = prompt('Причина отклонения'); if (note) save({ status: 'rejected', note }); }, 'btn-outline-danger');
+    box.appendChild(bar);
+    const nh = document.createElement('div'); nh.className = 'fw-bold mt-3'; nh.textContent = 'Соседи'; box.appendChild(nh);
+    if (!c.neighbors.length) { const e = document.createElement('div'); e.className = 'text-muted gx-nb'; e.textContent = 'нет связей'; box.appendChild(e); }
+    c.neighbors.forEach((n) => {
+      const row = document.createElement('div'); row.className = 'gx-nb';
+      const a = document.createElement('a'); a.href = '#'; a.textContent = (n.direction === 'out' ? '→ ' : '← ') + n.title + ' (' + n.type + (n.status !== 'approved' ? ', ' + n.status : '') + ')';
+      a.onclick = (ev) => { ev.preventDefault(); onNode(n.id); };
+      const x = document.createElement('a'); x.href = '#'; x.textContent = 'изменить'; x.onclick = (ev) => { ev.preventDefault(); editEdge(n.edgeId, n.type, n.status); };
+      row.append(a, x); box.appendChild(row);
+    });
+    if (c.sourceList && c.sourceList.length) {
+      const sh = document.createElement('div'); sh.className = 'fw-bold mt-3'; sh.textContent = 'Источники'; box.appendChild(sh);
+      c.sourceList.forEach((f) => { const r = document.createElement('div'); r.className = 'gx-nb'; r.textContent = (f.title || f.document || 'фрагмент'); box.appendChild(r); });
+    }
+    const m = document.createElement('div'); m.className = 'gx-msg'; box.appendChild(m);
+  }
+
+  async function editEdge(id, type, status) {
+    const action = prompt('Связь ' + type + ' (' + status + ').\nВведите: delete — удалить; reject — отклонить; approve — подтвердить; либо новый тип (' +
+      ['prereq','specializes','part_of','related','contrasts','misconception','example'].join(', ') + ')');
+    if (!action) return;
+    try {
+      if (action === 'delete') await post('/edge/' + id + '/delete');
+      else if (action === 'reject') { const note = prompt('Причина отклонения'); if (!note) return; await post('/edge/' + id, { status: 'rejected', note }); }
+      else if (action === 'approve') await post('/edge/' + id, { status: 'approved' });
+      else await post('/edge/' + id, { type: action });
+      await load(); if (st.selected) showCard(await api('/node/' + st.selected));
+    } catch (e) { alert(e.message); }
+  }
+
+  // ---------- события ----------
+  function group(id, key, attr, cb) {
+    $(id).querySelectorAll('button').forEach((b) => b.onclick = () => {
+      $(id).querySelectorAll('button').forEach((x) => x.classList.remove('active')); b.classList.add('active');
+      st[key] = b.dataset[attr]; cb();
+    });
+  }
+  group('gx-views', 'view', 'view', () => { $('gx-domain').style.display = st.view === 'areas' ? 'none' : ''; load(); });
+  group('gx-dim', 'dim', 'dim', () => st.data && render());
+  group('gx-layout', 'layout', 'layout', () => st.data && render());
+  $('gx-domain').onchange = load;
+  $('gx-search').oninput = applySearch;
+  ['f-draft', 'f-optional', 'f-nosrc'].forEach((id) => $(id).onchange = () => st.data && render());
+  $('gx-add-edge').onclick = () => {
+    st.addEdge = !st.addEdge; st.src = null; $('gx-add-edge').classList.toggle('active', st.addEdge);
+    if (st.cy) st.cy.nodes().removeClass('src');
+    if (st.addEdge) alert('Выберите сначала понятие, от которого идёт связь, затем то, на которое она ведёт.');
+  };
+
+  (async function init() {
+    const ov = await api('/overview');
+    const s = $('gx-domain');
+    ov.forEach((o) => { const x = document.createElement('option'); x.value = o.domain; x.textContent = o.domain + ' (' + o.concepts + ', черновиков ' + o.drafts + ')'; s.appendChild(x); });
+    if (!ov.length) { $('gx-info').textContent = 'Графов пока нет'; return; }
+    await load();
+  })();
+})();
+</script>
+{% endblock %}
