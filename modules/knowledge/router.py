@@ -20,6 +20,7 @@ from modules.knowledge.domains_api import router as _domains_router
 from modules.knowledge.provenance_api import router as _provenance_router
 from modules.knowledge.notifications_api import router as _notifications_router
 from modules.knowledge.profile_api import router as _profile_router
+from modules.knowledge.subjects_api import router as _subjects_router
 from modules.knowledge.review_api import router as _review_router
 from modules.knowledge.course import course_view, generate_course, mark_completed
 from modules.knowledge.cow import effective_graph, resolve_node
@@ -89,6 +90,7 @@ router.include_router(_provenance_router)
 router.include_router(_review_router)
 router.include_router(_notifications_router)
 router.include_router(_profile_router)
+router.include_router(_subjects_router)
 
 
 # ---- чтение эффективного графа (COW) ----
