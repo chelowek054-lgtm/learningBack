@@ -475,3 +475,24 @@ class DomainEmbedding(Base):
     text_hash: Mapped[str] = mapped_column(String, nullable=False)
     embedding = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+
+class UserSubject(Base):
+    """Предмет человека (T-0119, R-0062): запись со статусом вместо одного поля profile.subject.
+
+    Статус: building (собирается) | active (идёт) | paused (на паузе) | reached (цель достигнута).
+    """
+
+    __tablename__ = "user_subject"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    domain: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    target: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'understand'"))
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'active'"))
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("uq_user_subject_user_domain", "user_id", "domain", unique=True),)
