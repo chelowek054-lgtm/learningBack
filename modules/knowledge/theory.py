@@ -30,19 +30,26 @@ THEORY_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "heading": {"type": "string"},
+                    "heading": {
+                        "type": "string",
+                        "description": "короткий заголовок раздела, до 60 знаков, без инструкций",
+                    },
                     "body": {
                         "type": "string",
                         "description": "объяснение простыми словами, 3–6 предложений",
                     },
-                    "examples": {"type": "array", "items": {"type": "string"}},
+                    "examples": {
+                        "type": "array",
+                        "description": "1–2 примера с разбором; не класть примеры в body",
+                        "items": {"type": "string"},
+                    },
                     "counter_examples": {
                         "type": "array",
-                        "description": "типичные ошибки и что в них неверно",
+                        "description": "1–2 типичные ошибки и что в них неверно; не класть в body",
                         "items": {"type": "string"},
                     },
                 },
-                "required": ["heading", "body"],
+                "required": ["heading", "body", "examples", "counter_examples"],
             },
         }
     },
@@ -50,6 +57,18 @@ THEORY_SCHEMA: dict[str, Any] = {
 }
 
 _LEVEL = {"basic": "начальный", "middle": "средний", "advanced": "продвинутый"}
+
+
+MAX_HEADING = 80
+
+
+def clean_heading(text: str) -> str:
+    """Заголовок раздела — одна короткая строка: хвост инструкций и пояснений в скобках отрезается."""
+    head = " ".join(str(text or "").split())
+    for cut in (" (", ": ", ". "):
+        if cut in head[10:]:
+            head = head[: head.index(cut, 10)]
+    return head[:MAX_HEADING].rstrip(" ,;:-")
 
 
 def needs_theory(content: dict[str, Any]) -> bool:
@@ -62,6 +81,12 @@ def ensure_theory(session: Session, concept: Concept) -> bool:
     if not needs_theory(content) or not has_llm():
         return False
     sources = provenance.concept_sources(session, concept.id)
+    excerpts = "\n".join(f"— {f['text'][:600]}" for f in sources[:3] if f.get("text"))
+    grounding = (
+        f" Опирайся на фрагменты источника, не выдумывая сверх них:\n{excerpts}\n"
+        if excerpts
+        else ""
+    )
     try:
         raw = get_ai_gateway().structured(
             "submit_theory",
@@ -74,6 +99,7 @@ def ensure_theory(session: Session, concept: Concept) -> bool:
                 f"Уровень понятия: {_LEVEL.get(concept.level or '', 'средний')}. "
                 "Напиши теорию по разделам: определение простыми словами; зачем нужно и где встречается; "
                 "как устроено; пример с разбором; типичные ошибки и что путают. Без воды, по делу."
+                + grounding
             ),
         )
         sections = NodeContent.model_validate(
@@ -85,6 +111,8 @@ def ensure_theory(session: Session, concept: Concept) -> bool:
     if not sections:
         return False
     note = "По источнику" if sources else AUTO_NOTE
+    for sec in sections:
+        sec.heading = clean_heading(sec.heading) or concept.title
     content["sections"] = [s.model_dump() for s in sections]
     content["references"] = [{"title": note}]
     concept.content = NodeContent.model_validate(content).model_dump()

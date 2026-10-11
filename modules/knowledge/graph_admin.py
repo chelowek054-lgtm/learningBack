@@ -13,6 +13,7 @@ from typing import Any
 
 from jinja2 import ChoiceLoader, FileSystemLoader
 from sqladmin import BaseView, expose
+from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -33,8 +34,9 @@ def _reviewer(request: Request) -> uuid.UUID | None:
 async def _body(request: Request) -> dict[str, Any]:
     try:
         body = await request.json()
-    except ValueError:
-        return {}
+    except ValueError as e:
+        # Битое тело — ошибка запроса, а не «ничего не изменилось»: человек должен узнать, что правка не прошла.
+        raise HTTPException(422, "Тело запроса не JSON") from e
     return body if isinstance(body, dict) else {}
 
 
