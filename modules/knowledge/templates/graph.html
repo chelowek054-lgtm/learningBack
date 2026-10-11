@@ -54,7 +54,7 @@
     <span>размер — центральность</span>
     <span>пунктирный контур — необязательное</span>
     <span>серая рамка — нет источника</span>
-    <span>цвет линии: предпосылка — тёмная, мост между областями — синяя</span>
+    <span>линия: предпосылка — тёмная сплошная, мост между областями — синяя сплошная, прочие связи — голубой пунктир</span>
     <span id="gx-stages"></span>
     <span id="gx-info" class="ms-auto"></span>
   </div>
@@ -93,7 +93,9 @@
     else if (st.view === 'bridges') d = await api('/bridges?domain=' + encodeURIComponent(domain));
     else d = await api('/area?domain=' + encodeURIComponent(domain));
     st.data = d;
-    st.hiddenStages = new Set();
+    const key = st.view + ':' + domain;
+    if (st.lastKey !== key) st.hiddenStages = new Set();  // свёртку сохраняем, пока человек в той же области
+    st.lastKey = key;
     render();
   }
 
@@ -119,7 +121,7 @@
       id: n.id, label: n.title, status: n.status, optional: n.optional ? 1 : 0, nosrc: n.sources ? 0 : 1,
       size: 18 + (n.centrality || 0) * 40, stage: n.stage, stageOrder: n.stageOrder, domain: n.domain } }); });
     d.edges.forEach((e) => { if (keep.has(e.from) && keep.has(e.to)) els.push({ data: {
-      id: 'e' + e.id, eid: e.id, source: e.from, target: e.to, type: e.type, estatus: e.status || '' } }); });
+      id: 'e' + e.id, eid: e.type === 'bridge' ? null : e.id, source: e.from, target: e.to, type: e.type, estatus: e.status || '' } }); });
     return els;
   }
 
@@ -176,8 +178,9 @@
     $('gx-canvas').style.display = 'none'; $('gx-3d').style.display = 'block';
     if (st.cy) { st.cy.destroy(); st.cy = null; }
     const els = elements();
+    const q3 = $('gx-search').value.trim().toLowerCase();
     const nodes = els.filter((e) => !e.data.source).map((e) => ({ id: e.data.id, name: e.data.label,
-      color: COLOR[e.data.status] || '#8b95a5', val: e.data.size / 8 }));
+      color: q3 && !String(e.data.label).toLowerCase().includes(q3) ? '#d0d5dd' : (COLOR[e.data.status] || '#8b95a5'), val: e.data.size / 8 }));
     const links = els.filter((e) => e.data.source).map((e) => ({ source: e.data.source, target: e.data.target }));
     if (!st.fg) st.fg = ForceGraph3D()($('gx-3d'));
     st.fg.width($('gx-3d').clientWidth).height($('gx-3d').clientHeight).graphData({ nodes, links })
@@ -200,7 +203,8 @@
 
   function render() {
     const nodes = st.data.nodes.length;
-    $('gx-info').textContent = nodes + ' узлов, ' + st.data.edges.length + ' связей';
+    const shown = st.view === 'areas' ? nodes : st.data.nodes.filter(visible).length;
+    $('gx-info').textContent = shown + ' из ' + nodes + ' узлов, ' + st.data.edges.length + ' связей';
     renderStages();
     st.dim === '3d' ? render3d() : render2d();
   }
@@ -221,7 +225,18 @@
   }
 
   async function onNode(id) {
-    if (st.view === 'areas') { $('gx-domain').value = st.data.nodes.find((n) => n.id === id)?.title || $('gx-domain').value; return; }
+    if (st.view === 'areas') {
+      const title = st.data.nodes.find((n) => n.id === id)?.title;
+      const opt = [...$('gx-domain').options].find((o) => o.value === title || o.value === id);
+      if (opt) {
+        $('gx-domain').value = opt.value;
+        st.view = 'area';
+        $('gx-views').querySelectorAll('button').forEach((x) => x.classList.toggle('active', x.dataset.view === 'area'));
+        $('gx-domain').style.display = '';
+        await load();
+      }
+      return;
+    }
     if (st.addEdge) {
       if (!st.src) { st.src = id; st.cy && st.cy.getElementById(id).addClass('src'); msg('Теперь выберите понятие, на которое ведёт связь', true); return; }
       try {
@@ -313,7 +328,7 @@
   group('gx-dim', 'dim', 'dim', () => st.data && render());
   group('gx-layout', 'layout', 'layout', () => st.data && render());
   $('gx-domain').onchange = load;
-  $('gx-search').oninput = applySearch;
+  $('gx-search').oninput = () => { applySearch(); if (st.dim === '3d' && st.data) render3d(); };
   ['f-draft', 'f-optional', 'f-nosrc'].forEach((id) => $(id).onchange = () => st.data && render());
   $('gx-add-edge').onclick = () => {
     st.addEdge = !st.addEdge; st.src = null; $('gx-add-edge').classList.toggle('active', st.addEdge);
