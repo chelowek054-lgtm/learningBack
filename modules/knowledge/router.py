@@ -923,12 +923,30 @@ def patch_user_node(
 def delete_user_node(user_concept_id: str, user: CurrentUser, session: SessionDep) -> None:
     uc = session.get(UserConcept, user_concept_id)
     if uc is not None and uc.user_id == user.id:
+        # Личные рёбра, ведущие к узлу или от него, уходят вместе с ним, а не висят на пустоте.
+        session.query(UserEdge).filter(
+            UserEdge.user_id == user.id,
+            (UserEdge.from_id == uc.id) | (UserEdge.to_id == uc.id),
+        ).delete(synchronize_session=False)
         session.delete(uc)
         session.commit()
 
 
 @router.post("/user-edges", status_code=status.HTTP_201_CREATED)
 def create_user_edge(body: UserEdgeIn, user: CurrentUser, session: SessionDep) -> dict:
+    same = (
+        session.query(UserEdge)
+        .filter_by(
+            user_id=user.id,
+            domain=body.domain,
+            from_id=body.from_id,
+            to_id=body.to_id,
+            type=body.type,
+        )
+        .first()
+    )
+    if same is not None:
+        return {"id": str(same.id)}
     e = UserEdge(
         user_id=user.id,
         domain=body.domain,

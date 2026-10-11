@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
@@ -34,7 +36,11 @@ def _view(s: UserSubject) -> dict:
 
 
 def _own(session, user, subject_id: str) -> UserSubject:
-    row = session.get(UserSubject, subject_id)
+    try:
+        key = uuid.UUID(subject_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Предмет не найден") from None
+    row = session.get(UserSubject, key)
     if row is None or row.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Предмет не найден")
     return row

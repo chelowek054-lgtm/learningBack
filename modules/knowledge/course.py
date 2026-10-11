@@ -93,6 +93,7 @@ def _step(
         k: v
         for k, v in (
             ("stage", concept.stage),
+            ("stageOrder", concept.stage_order),
             ("level", concept.level),
             ("optional", True if concept.optional else None),
         )

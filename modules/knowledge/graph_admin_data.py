@@ -239,9 +239,11 @@ def update_node(
     if "stage" in fields:
         concept.stage = (str(fields["stage"]).strip() or None) if fields["stage"] else None
     if "stageOrder" in fields:
-        concept.stage_order = (
-            int(fields["stageOrder"]) if fields["stageOrder"] not in (None, "") else None
-        )
+        raw_order = fields["stageOrder"]
+        try:
+            concept.stage_order = int(raw_order) if raw_order not in (None, "") else None
+        except (TypeError, ValueError) as e:
+            raise GraphEditError("bad_stage_order", "Номер этапа — целое число") from e
     if "level" in fields:
         concept.level = stages.clean_level(fields["level"])
     if "optional" in fields:

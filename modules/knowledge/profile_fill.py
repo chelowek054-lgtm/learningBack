@@ -73,10 +73,15 @@ def fill_profile(session: Session, row: SkillProfile, goal_text: str, gateway: A
     level = profile.get("level")
     max_weight = max((a["weight"] for a in areas), default=1)
 
+    # Статус «в работе» сохраняем сразу: человек видит ход, а не пустой прогресс, пока считаются решения.
     for a in todo:
-        _decide(session, profile, a, gateway)
         states[a["key"]] = WORKING
     _save(session, row, profile)
+    for a in todo:
+        try:
+            _decide(session, profile, a, gateway)
+        except Exception:  # noqa: BLE001 — без решения область строится как новая
+            log.warning("Решение по области «%s» не получено", a["title"], exc_info=True)
 
     def fill(area: dict[str, Any]) -> list[dict[str, Any]]:
         budget = skill_profile.concept_budget(area, level, max_weight)
@@ -89,7 +94,11 @@ def fill_profile(session: Session, row: SkillProfile, goal_text: str, gateway: A
             for future in as_completed(futures):
                 area = futures[future]
                 try:
-                    area["concepts"] = future.result()
+                    concepts = future.result()
+                    if not concepts:
+                        # Пустой ответ — не успех: область осталась бы без понятий при статусе «готово».
+                        raise ValueError("модель не вернула понятий")
+                    area["concepts"] = concepts
                 except Exception:  # noqa: BLE001 — остальные области не страдают
                     log.warning("Область «%s» не наполнена", area["title"], exc_info=True)
                     states[area["key"]] = FAILED
@@ -97,8 +106,13 @@ def fill_profile(session: Session, row: SkillProfile, goal_text: str, gateway: A
                     _save(session, row, profile)
                     continue
                 states[area["key"]] = DONE
-                _decide(session, profile, area, gateway)
-                _publish(session, row, profile, gateway)
+                try:
+                    _decide(session, profile, area, gateway)
+                    _publish(session, row, profile, gateway)
+                except Exception:  # noqa: BLE001 — итоговый проход соберёт скелет целиком
+                    log.warning(
+                        "Область «%s» не опубликована досрочно", area["title"], exc_info=True
+                    )
                 _save(session, row, profile)
     return failed
 

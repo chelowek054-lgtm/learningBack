@@ -316,6 +316,9 @@ def build_graph(
     """Построить скелет графа по профилю: сопоставить (если ещё не), завести области и понятия."""
     if (row.status == BUILDING and not allow_building) or not row.profile:
         raise ProfileError("not_ready", "Профиль ещё не построен")
+    if row.status == OUTLINE or not any(a.get("concepts") for a in row.profile.get("areas", [])):
+        # Контур без понятий скелетом не станет: сперва «Собрать карту» (R-0055).
+        raise ProfileError("not_ready", "Сначала наполните контур: «Собрать карту»")
     if not (row.profile.get("match") or {}).get("areas"):
         match(session, row, gateway, allow_building=allow_building)
     report = profile_build.build_skeleton(
