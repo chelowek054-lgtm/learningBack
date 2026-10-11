@@ -32,6 +32,7 @@ from modules.knowledge.course import mark_completed
 from modules.knowledge.mastery import KNOWN_THRESHOLD, MasteryState, load_map
 from modules.knowledge.models import Concept, Course
 from modules.knowledge.placement import record_answer
+from modules.knowledge.theory import ensure_theory
 
 MODULE_ID = "knowledge"
 
@@ -81,6 +82,7 @@ def start_step(
         .all()
     }
 
+    ensure_theory(session, concept)  # теория по разделам строится при первом открытии (T-0121)
     content = NodeContent.model_validate(coerce_content(concept.content))
     created: list[Activity] = []
     for planned in step["activities"]:
