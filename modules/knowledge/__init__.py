@@ -129,11 +129,21 @@ class KnowledgeModule(BackendModule):
     def job_handlers(self):
         """Разбор документа в понятия идёт фоновой задачей (T-0077), а не на запросе человека."""
         from core import push
-        from modules.knowledge import ingest, merge, notifications, profile_sources, profile_store
+        from modules.knowledge import (
+            ingest,
+            merge,
+            node_compile,
+            notifications,
+            profile_sources,
+            profile_store,
+            reconcile,
+        )
 
         return {
             ingest.JOB_TYPE: ingest.ingest_job,
             merge.JOB_TYPE: merge.merge_job,
+            reconcile.JOB_TYPE: reconcile.reconcile_job,
+            node_compile.JOB_TYPE: node_compile.compile_job,
             push.JOB_TYPE: notifications.push_job,
             profile_store.JOB_TYPE: profile_store.profile_job,
             profile_sources.JOB_TYPE: profile_sources.sources_job,

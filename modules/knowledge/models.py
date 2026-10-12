@@ -21,6 +21,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column
@@ -268,6 +269,15 @@ class SourceDocument(Base):
     meta: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     added_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+    # Язык текста документа (`en`, `ru`); определяется при приёме без модели (T-0176).
+    lang: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Уровень доверия A/B/C и причины; пусто — воронка ещё не прошла (T-0168, T-0169).
+    trust_tier: Mapped[str | None] = mapped_column(String, nullable=True)
+    trust_reasons: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    # Отказ воронки или карантин: в извлечение и сборку узлов не идёт, пока администратор не посмотрит.
+    quarantined: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class SourceFragment(Base):
@@ -496,3 +506,148 @@ class UserSubject(Base):
     created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
 
     __table_args__ = (Index("uq_user_subject_user_domain", "user_id", "domain", unique=True),)
+
+
+# ---- утверждения (R-0071, T-0149) ----
+
+CLAIM_KINDS = ("definition", "property", "formula", "condition", "example", "misconception")
+# Статус утверждения: proposed — пришло из источника, ждёт сверки; accepted — принято в узел;
+# disputed — есть открытая проблема, в теорию не идёт; replaced — заменено новым (история сохраняется).
+CLAIM_STATUSES = ("proposed", "accepted", "disputed", "replaced")
+VOLATILITY = ("stable", "slow", "fast")
+
+
+class Claim(Base):
+    """Атомарное утверждение понятия: единица слияния, сверки и сборки теории."""
+
+    __tablename__ = "claim"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    concept_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False, server_default=sql_text("'property'"))
+    # Канонический текст на английском; переводы — в text_i18n по коду языка (A-0034).
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text_i18n: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=sql_text("'{}'::jsonb")
+    )
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=sql_text("'proposed'")
+    )
+    # Область применимости («с версии 3.12»): утверждения с разной областью друг другу не противоречат.
+    applicability: Mapped[str | None] = mapped_column(String, nullable=True)
+    volatility: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=sql_text("'stable'")
+    )
+    # «Актуально на» — дата источника; «пересмотреть после» — дата плюс срок по классу (T-0162).
+    as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    replaced_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_claim_concept", "concept_id", "status"),)
+
+
+class ClaimSource(Base):
+    """Ссылка утверждения на место в источнике: фрагмент, дословная цитата и её смещения."""
+
+    __tablename__ = "claim_source"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    claim_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("claim.id", ondelete="CASCADE"), nullable=False
+    )
+    fragment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("source_fragment.id", ondelete="CASCADE"), nullable=False
+    )
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    # Смещения цитаты в тексте фрагмента; null — цитата найдена только с нормализацией пробелов.
+    char_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+
+    __table_args__ = (Index("uq_claim_source", "claim_id", "fragment_id", unique=True),)
+
+
+class ClaimConflict(Base):
+    """Проблема в пуле для администраторов: два утверждения узла противоречат друг другу (R-0074)."""
+
+    __tablename__ = "claim_conflict"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # a — принятое утверждение узла, b — пришедшее.
+    a_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("claim.id", ondelete="CASCADE"), nullable=False
+    )
+    b_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("claim.id", ondelete="CASCADE"), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(String, nullable=False, server_default=text("''"))
+    # open | resolved; решение: a, b, both, disputed, outdated.
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'open'"))
+    resolution: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_claim_conflict_status", "status"),)
+
+
+class ConceptTerm(Base):
+    """Название или синоним понятия на языке: словарь терминов для сопоставления между языками (T-0171)."""
+
+    __tablename__ = "concept_term"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    concept_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), nullable=False
+    )
+    lang: Mapped[str] = mapped_column(String, nullable=False)
+    term: Mapped[str] = mapped_column(String, nullable=False)
+    primary: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+
+    __table_args__ = (
+        Index("uq_concept_term", "concept_id", "lang", "term", unique=True),
+        Index("idx_concept_term_lookup", "lang", "term"),
+    )
+
+
+class ConceptArea(Base):
+    """Принадлежность понятия области: этап, уровень и необязательность — для этой области (R-0073)."""
+
+    __tablename__ = "concept_area"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    concept_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), nullable=False
+    )
+    domain: Mapped[str] = mapped_column(String, nullable=False)
+    stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    stage_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    level: Mapped[str | None] = mapped_column(String, nullable=True)
+    optional: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+
+    __table_args__ = (Index("uq_concept_area", "concept_id", "domain", unique=True),)
+
+
+class LearningItem(Base):
+    """Готовое учебное задание узла (карточка, тест, пропуск, порядок) с ключом ответа: проверка без модели."""
+
+    __tablename__ = "learning_item"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    concept_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("concept.id", ondelete="CASCADE"), nullable=False
+    )
+    concept_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    lang: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # card | mcq | cloze | order
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    answer_key: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    claim_ids: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(_ts, server_default=func.now())
+
+    __table_args__ = (Index("idx_learning_item_concept", "concept_id", "lang", "concept_version"),)

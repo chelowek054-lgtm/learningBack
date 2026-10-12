@@ -17,6 +17,7 @@ from modules.knowledge.centrality import recompute_centrality
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.cross_links_api import router as _cross_links_router
 from modules.knowledge.domains_api import router as _domains_router
+from modules.knowledge.claims_api import router as _claims_router
 from modules.knowledge.provenance_api import router as _provenance_router
 from modules.knowledge.notifications_api import router as _notifications_router
 from modules.knowledge.profile_api import router as _profile_router
@@ -87,6 +88,7 @@ router = APIRouter(prefix="/graph", tags=["graph"])
 router.include_router(_cross_links_router)
 router.include_router(_domains_router)
 router.include_router(_provenance_router)
+router.include_router(_claims_router)
 router.include_router(_review_router)
 router.include_router(_notifications_router)
 router.include_router(_profile_router)

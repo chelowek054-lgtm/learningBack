@@ -22,8 +22,7 @@ KNOWLEDGE_DIR = Path(__file__).resolve().parent.parent / "modules" / "knowledge"
 SUBJECT_WORDS = [
     "ielts",
     "toefl",
-    "english",
-    "английск",
+    # «английский» — не предмет, а основной язык графа (A-0034): слова языков здесь не проверяются.
     "машинн",
     "нейро",
     "backprop",

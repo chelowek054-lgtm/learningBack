@@ -54,6 +54,17 @@ def _no_live_llm() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _no_funnel() -> Iterator[None]:
+    """Воронка отсева источников в общих тестах выключена: у тестовых документов нет лицензии и объёма."""
+    saved = settings.funnel_enabled
+    settings.funnel_enabled = False
+    try:
+        yield
+    finally:
+        settings.funnel_enabled = saved
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _no_job_threads() -> Iterator[None]:
     """Тесты исполняют задачи сами и по порядку: поток с отдельной сессией ушёл бы мимо отката теста."""
     saved = settings.jobs_inline_thread
