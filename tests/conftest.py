@@ -1,6 +1,6 @@
 """Общая обвязка тестов.
 
-Тесты идут против ОТДЕЛЬНОЙ базы (`<db>_test`), а не рабочей: модели используют
+Тесты идут против ОТДЕЛЬНОЙ базы (`<db>_test_<id запуска>`), а не рабочей: модели используют
 JSONB/UUID, так что SQLite не подходит, а ронять данные стенда нельзя. База
 создаётся один раз за сессию, схема — из общей metadata; каждый тест работает
 внутри транзакции, которая откатывается, поэтому тесты не видят друг друга.
@@ -97,9 +97,21 @@ def usage_rows(monkeypatch) -> list:
     return sink.rows
 
 
-def _test_database_url() -> str:
+def _test_database_url(run_id: str) -> str:
+    """База на запуск: параллельные pytest не делят её и не пересоздают друг у друга схему (T-0125)."""
     base, _, name = settings.database_url.rpartition("/")
-    return f"{base}/{name}{TEST_DB_SUFFIX}"
+    return f"{base}/{name}{TEST_DB_SUFFIX}_{run_id}"
+
+
+def _drop_database(url: str) -> None:
+    """Удаляет базу запуска; сбой удаления не должен валить прогон — остаток уберёт следующий запуск вручную."""
+    base, _, name = url.rpartition("/")
+    admin_dsn = f"{base}/postgres".replace("postgresql+psycopg://", "postgresql://")
+    try:
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+    except psycopg.Error:
+        pass
 
 
 def _ensure_database(url: str) -> None:
@@ -114,7 +126,7 @@ def _ensure_database(url: str) -> None:
 
 @pytest.fixture(scope="session")
 def engine():
-    url = _test_database_url()
+    url = _test_database_url(uuid.uuid4().hex[:8])
     _ensure_database(url)
     eng = create_engine(url, pool_pre_ping=True, future=True)
     # Пересоздаём схему целиком: create_all не эволюционирует существующие таблицы,
@@ -125,6 +137,7 @@ def engine():
     Base.metadata.create_all(eng)
     yield eng
     eng.dispose()
+    _drop_database(url)
 
 
 @pytest.fixture

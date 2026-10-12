@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import uuid
 
 import psycopg
 import pytest
@@ -20,7 +21,8 @@ from core.db import Base
 import core.models  # noqa: F401  # регистрация таблиц
 import modules.knowledge.models  # noqa: F401
 
-SCRATCH = "praxis_migrations_check"
+# Имя на запуск: параллельные pytest не пересоздают друг у друга базу (T-0125).
+SCRATCH = f"praxis_migrations_check_{uuid.uuid4().hex[:8]}"
 
 
 @pytest.fixture(scope="module")

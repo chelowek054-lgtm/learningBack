@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 import pytest
 
@@ -22,7 +23,8 @@ def seaweed(monkeypatch):
         "s3_public_endpoint": S3_URL,
         "s3_access_key": "praxis",
         "s3_secret_key": "praxis-secret",
-        "s3_bucket": "praxis-backup-test",
+        # Бакет на запуск: параллельные прогоны не видят чужие ключи и не стирают друг другу объекты (T-0125).
+        "s3_bucket": f"praxis-backup-test-{uuid.uuid4().hex[:8]}",
     }.items():
         monkeypatch.setattr(settings, name, value)
     objects.reset_store()
