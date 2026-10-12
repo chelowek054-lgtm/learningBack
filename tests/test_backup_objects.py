@@ -33,6 +33,11 @@ def seaweed(monkeypatch):
     yield store
     for key in backup_objects._keys():  # noqa: SLF001
         store.delete(key)
+    # Бакет на запуск занимает тома хранилища; без удаления они кончаются и PutObject падает с InternalError.
+    try:
+        store._s3.delete_bucket(Bucket=store._bucket)  # noqa: SLF001
+    except Exception:  # noqa: BLE001 — уборка не должна ронять прогон
+        pass
     objects.reset_store()
 
 
