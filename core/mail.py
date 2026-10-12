@@ -15,6 +15,7 @@ from email.message import EmailMessage
 from typing import Protocol
 
 from core.config import settings
+from core.messages import msg
 
 log = logging.getLogger("praxis.mail")
 
@@ -60,9 +61,8 @@ def send_safely(to: str, subject: str, body: str) -> bool:
         return False
 
 
-def reset_code_message(code: str, ttl_minutes: int) -> tuple[str, str]:
+def reset_code_message(code: str, ttl_minutes: int, lang: str = "ru") -> tuple[str, str]:
     return (
-        "Код восстановления пароля Praxis",
-        f"Ваш код: {code}\n\nОн действует {ttl_minutes} мин. Если вы не просили сменить пароль, "
-        "просто проигнорируйте это письмо.",
+        msg(lang, "mail.reset.subject"),
+        msg(lang, "mail.reset.body", code=code, ttl=ttl_minutes),
     )

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 
 from core.deps import CurrentSuperuser, CurrentUser, SessionDep
-from modules.knowledge import funnel, langs, reconcile
+from modules.knowledge import freshness, funnel, langs, reconcile
 from modules.knowledge.models import (
     Claim,
     ClaimSource,
@@ -89,6 +89,8 @@ def node_claims(
                     "page": f.page,
                     "heading": f.heading,
                     "url": _anchor(d, f.page),
+                    # Оригинал недоступен: ссылка помечена, сохранённый фрагмент и атрибуция остаются.
+                    "linkDead": bool((d.meta or {}).get("linkDead")),
                     # Цитата показывается с атрибуцией только при разрешающей лицензии.
                     "quote": cs.quote if shows_text else None,
                 }
@@ -232,3 +234,37 @@ def rebuild_domain(
     job = reconcile.enqueue(session, domain, admin.id)
     session.commit()
     return {"jobId": str(job.id), "domain": domain}
+
+
+@router.post("/graph/claims/refresh", status_code=status.HTTP_202_ACCEPTED)
+def refresh_stale(admin: CurrentSuperuser, session: SessionDep) -> dict:
+    """Найти просроченные утверждения и поставить поиск свежих источников по их областям (T-0163)."""
+    stale = freshness.stale_by_domain(session)
+    job = freshness.enqueue_refresh(session, admin.id)
+    session.commit()
+    return {"jobId": str(job.id), "staleDomains": {d: len(t) for d, t in stale.items()}}
+
+
+@router.post("/graph/sources/check-links", status_code=status.HTTP_202_ACCEPTED)
+def check_links(admin: CurrentSuperuser, session: SessionDep) -> dict:
+    """Проверить адреса источников; недоступные помечаются, фрагменты остаются (T-0164)."""
+    job = freshness.enqueue_links(session, admin.id)
+    session.commit()
+    return {"jobId": str(job.id)}
+
+
+class RevokeIn(BaseModel):
+    reason: str = Field(default="", max_length=300)
+
+
+@router.post("/graph/sources/{doc_id}/revoke")
+def revoke_source(
+    doc_id: str, body: RevokeIn, admin: CurrentSuperuser, session: SessionDep
+) -> dict:
+    """Отозвать источник: удалить его и выведенное только из него; изучаемое отклоняется (T-0167)."""
+    try:
+        out = freshness.revoke_source(session, _uuid(doc_id, "Источник"), body.reason)
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+    session.commit()
+    return out

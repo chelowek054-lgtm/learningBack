@@ -8,6 +8,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 
 from core.config import settings
 from core.deps import CurrentUser, SessionDep
+from core.errors import ApiError
+from core.messages import user_lang
 from core.mail import reset_code_message, send_safely
 from core.models import PasswordResetCode, User
 from core.schemas import (
@@ -16,6 +18,7 @@ from core.schemas import (
     PasswordResetRequestIn,
     ProfileIn,
     RegisterIn,
+    StudyLangIn,
     TokenOut,
     UserOut,
 )
@@ -107,7 +110,9 @@ def password_reset_request(
         )
         session.commit()
         # В фоне: время ответа не должно выдавать, есть ли такой email и ушло ли письмо.
-        subject, text = reset_code_message(code, settings.password_reset_code_ttl_minutes)
+        subject, text = reset_code_message(
+            code, settings.password_reset_code_ttl_minutes, user_lang(user.profile)
+        )
         background.add_task(send_safely, user.email, subject, text)
     return {"status": "accepted", "ttl_minutes": settings.password_reset_code_ttl_minutes}
 
@@ -148,6 +153,31 @@ def password_reset_confirm(body: PasswordResetConfirmIn, session: SessionDep) ->
 
 @router.get("/me", response_model=UserOut)
 def me(user: CurrentUser) -> User:
+    return user
+
+
+@router.put("/me/lang", response_model=UserOut)
+def update_study_lang(body: StudyLangIn, user: CurrentUser, session: SessionDep) -> User:
+    """Язык изучения: теория, названия и задания узлов приходят на нём, если перевод есть."""
+    from modules.knowledge import langs
+
+    for value in (body.study_lang, body.ui_lang):
+        if value is not None and value not in langs.supported():
+            raise ApiError(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "lang_unsupported",
+                "язык не поддерживается",
+                {"lang": value},
+            )
+    profile = dict(user.profile or {})
+    for key, value in (("studyLang", body.study_lang), ("uiLang", body.ui_lang)):
+        if value is None:
+            profile.pop(key, None)
+        else:
+            profile[key] = value
+    user.profile = profile
+    session.commit()
+    session.refresh(user)
     return user
 
 

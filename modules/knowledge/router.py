@@ -24,6 +24,7 @@ from modules.knowledge.profile_api import router as _profile_router
 from modules.knowledge.subjects_api import router as _subjects_router
 from modules.knowledge.review_api import router as _review_router
 from modules.knowledge.course import course_view, generate_course, mark_completed
+from modules.knowledge.localize import StudyLang, term_titles
 from modules.knowledge.cow import effective_graph, resolve_node
 from modules.knowledge.study import (
     MODULE_ID,
@@ -97,12 +98,12 @@ router.include_router(_subjects_router)
 
 # ---- чтение эффективного графа (COW) ----
 @router.get("/{domain}")
-def get_graph(domain: str, user: CurrentUser, session: SessionDep) -> dict:
-    return effective_graph(session, user.id, domain)
+def get_graph(domain: str, user: CurrentUser, session: SessionDep, lang: StudyLang) -> dict:
+    return effective_graph(session, user.id, domain, lang=lang)
 
 
 @router.get("/nodes/{node_id}")
-def get_node(node_id: str, user: CurrentUser, session: SessionDep) -> dict:
+def get_node(node_id: str, user: CurrentUser, session: SessionDep, lang: StudyLang) -> dict:
     """Полный узел с теорией: канонический (с оверрайдом пользователя) или свой."""
     try:
         node_uuid = uuid.UUID(node_id)
@@ -111,7 +112,7 @@ def get_node(node_id: str, user: CurrentUser, session: SessionDep) -> dict:
     c = session.get(Concept, node_uuid)
     if c is not None:
         uc = session.query(UserConcept).filter_by(user_id=user.id, base_concept_id=c.id).first()
-        return resolve_node(c, uc)
+        return resolve_node(c, uc, lang=lang, titles=term_titles(session, [c.id], lang))
     uc = session.get(UserConcept, node_uuid)
     if uc is None or uc.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "узел не найден")
@@ -574,11 +575,11 @@ def create_course(domain: str, body: CourseIn, user: CurrentUser, session: Sessi
 
 
 @router.get("/course/{domain}")
-def read_course(domain: str, user: CurrentUser, session: SessionDep) -> dict:
+def read_course(domain: str, user: CurrentUser, session: SessionDep, lang: StudyLang) -> dict:
     course = session.query(Course).filter_by(user_id=user.id, domain=domain).one_or_none()
     if course is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "курс не построен")
-    return course_view(course, session)
+    return course_view(course, session, lang)
 
 
 @router.post("/course/{domain}/complete")
@@ -602,11 +603,13 @@ def _course_of(session, user_id, domain) -> Course:
 
 
 @router.post("/course/{domain}/step/{concept_id}/start")
-def start_course_step(domain: str, concept_id: str, user: CurrentUser, session: SessionDep) -> dict:
+def start_course_step(
+    domain: str, concept_id: str, user: CurrentUser, session: SessionDep, lang: StudyLang
+) -> dict:
     """Развернуть шаг в активности движка: теория, задания, карточка удержания."""
     course = _course_of(session, user.id, domain)
     try:
-        activities = start_step(session, user.id, course, concept_id)
+        activities = start_step(session, user.id, course, concept_id, lang)
     except LookupError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     cards = review_card_ids(session, user.id, course, concept_id)

@@ -61,12 +61,15 @@ def _score_choice(item: AssessmentItem, answer: Any) -> tuple[float, str]:
 def _score_open(item: AssessmentItem, answer: str) -> tuple[float, str]:
     if not answer.strip():
         return 0.0, "Ответ пуст."
+    if item.exact:
+        same = _norm(answer) == _norm(item.expected)
+        return (1.0, "Верно.") if same else (0.0, f"Верный ответ: {item.expected}")
     if not has_llm():
         return _overlap_score(item.expected, answer)
 
     prompt = (
         "Оцени ответ ученика по эталону. Опирайся только на эталон, "
-        "не добавляй своих требований.\n\n"
+        "не добавляй своих требований. Объяснение пиши на языке ответа ученика.\n\n"
         f"ВОПРОС: {item.prompt}\n"
         f"ЭТАЛОН: {item.expected}\n"
         f"ОТВЕТ УЧЕНИКА: {answer}"
@@ -76,6 +79,10 @@ def _score_open(item: AssessmentItem, answer: str) -> tuple[float, str]:
         return _overlap_score(item.expected, answer)
     score = max(0.0, min(1.0, float(raw["score"])))
     return score, str(raw.get("explanation", ""))
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.casefold().split()).strip(" .,;:!?")
 
 
 def _overlap_score(expected: str, answer: str) -> tuple[float, str]:

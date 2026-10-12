@@ -9,7 +9,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from modules.knowledge.models import Concept, ConceptEdge
+from modules.knowledge.areas import area_concepts
+from modules.knowledge.models import ConceptEdge
 
 # Порог предложения в ядро (доля узлов, зависящих от данного).
 CORE_THRESHOLD = 0.5
@@ -22,7 +23,7 @@ def recompute_centrality(
 ) -> list[dict[str, Any]]:
     """Пересчитать centrality всех узлов домена (нормированный descendant-count) и
     вернуть список с предложением tier='core'."""
-    concepts = session.query(Concept).filter(Concept.domain == domain).all()
+    concepts = area_concepts(session, domain)
     ids = {c.id for c in concepts}
 
     adj: dict[uuid.UUID, list[uuid.UUID]] = {c.id: [] for c in concepts}

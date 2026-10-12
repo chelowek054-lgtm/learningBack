@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from core.admin import setup_admin
 from core import modules
 from core.ai_base import ProviderError
+from core.errors import ApiError
 from core.config import settings
 from core.db import SessionLocal
 from core.usage import UserContextMiddleware
@@ -53,6 +54,16 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Praxis API", version=settings.app_version, lifespan=lifespan)
+
+
+@app.exception_handler(ApiError)
+async def api_error(_request, exc: ApiError):
+    """Ошибка с кодом: `detail` — текст для прежних клиентов, `code` и `params` — для выбора текста на клиенте."""
+    d = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": d["message"], "code": d["code"], "params": d["params"]},
+    )
 
 
 @app.exception_handler(ProviderError)

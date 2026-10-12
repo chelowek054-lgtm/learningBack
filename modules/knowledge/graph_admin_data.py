@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from modules.knowledge import domains, provenance, stages
 from modules.knowledge.content import NodeContent, coerce_content
+from modules.knowledge.areas import area_concepts, in_area
 from modules.knowledge.models import Concept, ConceptEdge, ConceptLink, ConceptSource
 
 EDGE_TYPES = (
@@ -108,7 +109,7 @@ def overview(session: Session) -> list[dict[str, Any]]:
 
 def area_graph(session: Session, domain: str) -> dict[str, Any]:
     """Понятия одной области и связи между ними; этапы — по возрастанию порядка."""
-    concepts = session.query(Concept).filter(Concept.domain == domain).all()
+    concepts = area_concepts(session, domain)
     ids = [c.id for c in concepts]
     counts = _source_counts(session, ids)
     edges = (
@@ -155,7 +156,7 @@ def domains_graph(session: Session) -> dict[str, Any]:
 
 def bridges_graph(session: Session, domain: str) -> dict[str, Any]:
     """Мосты `concept_link` с выбранной областью: её понятия и понятия других областей по ту сторону."""
-    mine = {c.id for c in session.query(Concept.id).filter(Concept.domain == domain)}
+    mine = {c.id for c in session.query(Concept.id).filter(in_area(domain))}
     links = (
         session.query(ConceptLink)
         .filter((ConceptLink.from_id.in_(mine)) | (ConceptLink.to_id.in_(mine)))

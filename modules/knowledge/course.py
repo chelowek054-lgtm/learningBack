@@ -34,6 +34,8 @@ from modules.knowledge.mastery import (
     load_map,
     prerequisite_map,
 )
+from modules.knowledge.areas import area_concepts, area_meta
+from modules.knowledge.localize import term_titles
 from modules.knowledge.models import Concept, ConceptEdge, Course
 
 # Почему узел попал в путь — это объяснение курса, а не отладочная метка.
@@ -88,14 +90,22 @@ def _step(
     *,
     has_misconception: bool = False,
     preferred: dict[str, str] | None = None,
+    area: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    # этап, уровень и необязательность берутся для этой области (R-0073), иначе из самого понятия
+    own = area or {
+        "stage": concept.stage,
+        "stageOrder": concept.stage_order,
+        "level": concept.level,
+        "optional": bool(concept.optional),
+    }
     labels = {
         k: v
         for k, v in (
-            ("stage", concept.stage),
-            ("stageOrder", concept.stage_order),
-            ("level", concept.level),
-            ("optional", True if concept.optional else None),
+            ("stage", own["stage"]),
+            ("stageOrder", own["stageOrder"]),
+            ("level", own["level"]),
+            ("optional", True if own["optional"] else None),
         )
         if v is not None
     }
@@ -161,12 +171,13 @@ def build_path(
     if target_bloom not in BLOOM_LEVELS:
         raise ValueError(f"неизвестная ступень Блума: {target_bloom!r}")
 
-    concepts = {c.id: c for c in session.query(Concept).filter(Concept.domain == domain).all()}
+    concepts = {c.id: c for c in area_concepts(session, domain)}
     if not concepts:
         return []
     prereqs = prerequisite_map(session, domain)
     states = load_map(session, user_id, domain)
     broken = _misconception_nodes(session, set(concepts))
+    areas = area_meta(session, domain)
     wanted = set(interests or [])
 
     def known(cid: uuid.UUID) -> bool:
@@ -183,6 +194,7 @@ def build_path(
                 reason,
                 has_misconception=concept.id in broken,
                 preferred=preferred,
+                area=areas.get(concept.id),
             )
         )
         planned.add(concept.id)
@@ -333,7 +345,9 @@ def _kept_progress(progress: Any, path: list[dict[str, Any]]) -> list[str]:
     return [step["conceptId"] for step in path if step["conceptId"] in done]
 
 
-def course_view(course: Course, session: Session | None = None) -> dict[str, Any]:
+def course_view(
+    course: Course, session: Session | None = None, lang: str | None = None
+) -> dict[str, Any]:
     """Курс для клиента: путь, прогресс и что делать сейчас.
 
     С сессией у каждого шага есть статус: «проверено» или «черновик» (R-0044). Статус читается из
@@ -342,9 +356,15 @@ def course_view(course: Course, session: Session | None = None) -> dict[str, Any
     """
     completed = set((course.progress or {}).get("completed") or [])
     statuses = _statuses(session, [s["conceptId"] for s in (course.path or [])]) if session else {}
+    titles = (
+        term_titles(session, [uuid.UUID(s["conceptId"]) for s in (course.path or [])], lang)
+        if session and lang
+        else {}
+    )
     steps = [
         {
             **step,
+            **({"title": titles[step["conceptId"]]} if step["conceptId"] in titles else {}),
             "done": step["conceptId"] in completed,
             **({"status": statuses[step["conceptId"]]} if step["conceptId"] in statuses else {}),
         }

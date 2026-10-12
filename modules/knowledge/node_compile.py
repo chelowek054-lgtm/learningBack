@@ -15,10 +15,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from core.models import Job
+from core.models import Job, SrsCard
 from modules.knowledge import funnel, langs
+from modules.knowledge.areas import in_area
 from modules.knowledge.models import (
     Claim,
     ClaimSource,
@@ -272,6 +274,11 @@ def compile_concept(session: Session, concept: Concept, gateway, report: Compile
         "claims_hash": digest,
     }
     concept.version = (concept.version or 1) + 1  # старые задания обесцениваются (кэш по версии)
+    if content.get("i18n"):
+        # Узел уже собирался и изменился (замена утверждений): изучавшим он возвращается в повторение.
+        session.query(SrsCard).filter(SrsCard.concept_id == concept.id).update(
+            {SrsCard.due_at: func.now()}, synchronize_session=False
+        )
     session.flush()
 
     # Банк заданий: старые строки узла заменяются.
@@ -326,7 +333,7 @@ def compile_domain(session: Session, domain: str, gateway) -> CompileReport:
     report = CompileReport()
     concepts = (
         session.query(Concept)
-        .filter(Concept.domain == domain, Concept.status != "rejected")
+        .filter(in_area(domain), Concept.status != "rejected")
         .order_by(Concept.title)
         .all()
     )
