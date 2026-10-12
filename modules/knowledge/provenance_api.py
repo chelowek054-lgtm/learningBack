@@ -103,6 +103,11 @@ def list_sources(_: CurrentSuperuser, session: SessionDep) -> list[dict]:
             "level": d.level,
             "license": d.license,
             "originUrl": d.origin_url,
+            # язык текста, уровень доверия и отказ воронки: администратор видит разбивку по языкам (R-0080)
+            "lang": d.lang,
+            "trustTier": d.trust_tier,
+            "trustReasons": list(d.trust_reasons or []),
+            "quarantined": bool(d.quarantined),
             "createdAt": d.created_at.isoformat() if d.created_at else None,
             "progress": ingest.progress(session, d),
         }

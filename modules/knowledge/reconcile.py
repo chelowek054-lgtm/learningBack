@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.models import Job
-from modules.knowledge import freshness, provenance
+from modules.knowledge import freshness, funnel, provenance
 from modules.knowledge.models import (
     Claim,
     ClaimConflict,
@@ -268,6 +268,7 @@ def reconcile_domain(session: Session, domain: str, gateway) -> ReconcileReport:
         reconcile_concept(session, concept, gateway, report)
         if maybe_publish(session, concept):
             report.published += 1
+    funnel.after_reconcile(session, domain)
     return report
 
 

@@ -51,7 +51,7 @@ def _anchor(doc: SourceDocument, page: int | None) -> str | None:
     return doc.origin_url
 
 
-@router.get("/graph/nodes/{concept_id}/claims")
+@router.get("/nodes/{concept_id}/claims")
 def node_claims(
     concept_id: str,
     _: CurrentUser,
@@ -110,7 +110,7 @@ def node_claims(
     return out
 
 
-@router.post("/graph/claims/{claim_id}/report", status_code=status.HTTP_201_CREATED)
+@router.post("/claims/{claim_id}/report", status_code=status.HTTP_201_CREATED)
 def report_error(claim_id: str, body: ReportIn, user: CurrentUser, session: SessionDep) -> dict:
     """«Здесь ошибка»: жалоба привязана к утверждению, несколько жалоб поднимают его в очереди."""
     cid = _uuid(claim_id, "Утверждение")
@@ -129,7 +129,7 @@ def report_error(claim_id: str, body: ReportIn, user: CurrentUser, session: Sess
     return {"ok": True}
 
 
-@router.get("/graph/claims/reports")
+@router.get("/claims/reports")
 def list_reports(_: CurrentSuperuser, session: SessionDep) -> list[dict]:
     """Утверждения с жалобами: больше жалоб — выше."""
     rows = (
@@ -166,7 +166,7 @@ def list_reports(_: CurrentSuperuser, session: SessionDep) -> list[dict]:
     return out
 
 
-@router.get("/graph/claims/problems")
+@router.get("/claims/problems")
 def list_problems(
     _: CurrentSuperuser,
     session: SessionDep,
@@ -176,7 +176,7 @@ def list_problems(
     return reconcile.pool(session, domain, state)
 
 
-@router.post("/graph/claims/problems/{problem_id}/resolve")
+@router.post("/claims/problems/{problem_id}/resolve")
 def resolve_problem(
     problem_id: str, body: ResolveIn, admin: CurrentSuperuser, session: SessionDep
 ) -> dict:
@@ -192,7 +192,7 @@ def resolve_problem(
     return {"id": str(cf.id), "status": cf.status, "resolution": cf.resolution}
 
 
-@router.get("/graph/nodes/{concept_id}/items")
+@router.get("/nodes/{concept_id}/items")
 def node_items(
     concept_id: str,
     _: CurrentUser,
@@ -224,7 +224,7 @@ def node_items(
     ]
 
 
-@router.post("/graph/claims/rebuild", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/claims/rebuild", status_code=status.HTTP_202_ACCEPTED)
 def rebuild_domain(
     admin: CurrentSuperuser,
     session: SessionDep,
@@ -236,7 +236,7 @@ def rebuild_domain(
     return {"jobId": str(job.id), "domain": domain}
 
 
-@router.post("/graph/claims/refresh", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/claims/refresh", status_code=status.HTTP_202_ACCEPTED)
 def refresh_stale(admin: CurrentSuperuser, session: SessionDep) -> dict:
     """Найти просроченные утверждения и поставить поиск свежих источников по их областям (T-0163)."""
     stale = freshness.stale_by_domain(session)
@@ -245,7 +245,7 @@ def refresh_stale(admin: CurrentSuperuser, session: SessionDep) -> dict:
     return {"jobId": str(job.id), "staleDomains": {d: len(t) for d, t in stale.items()}}
 
 
-@router.post("/graph/sources/check-links", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/sources/check-links", status_code=status.HTTP_202_ACCEPTED)
 def check_links(admin: CurrentSuperuser, session: SessionDep) -> dict:
     """Проверить адреса источников; недоступные помечаются, фрагменты остаются (T-0164)."""
     job = freshness.enqueue_links(session, admin.id)
@@ -257,7 +257,7 @@ class RevokeIn(BaseModel):
     reason: str = Field(default="", max_length=300)
 
 
-@router.post("/graph/sources/{doc_id}/revoke")
+@router.post("/sources/{doc_id}/revoke")
 def revoke_source(
     doc_id: str, body: RevokeIn, admin: CurrentSuperuser, session: SessionDep
 ) -> dict:
