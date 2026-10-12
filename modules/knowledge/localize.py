@@ -21,9 +21,9 @@ PROFILE_KEY = "studyLang"
 
 
 def study_lang(profile: dict[str, Any] | None, requested: str | None = None) -> str | None:
-    """Язык ответа: запрошенный, иначе из профиля; неподдерживаемый отбрасывается."""
+    """Язык ответа: запрошенный, затем язык изучения, затем язык интерфейса; неподдерживаемый отбрасывается."""
     ok = langs.supported()
-    for candidate in (requested, (profile or {}).get(PROFILE_KEY)):
+    for candidate in (requested, (profile or {}).get(PROFILE_KEY), (profile or {}).get("uiLang")):
         if isinstance(candidate, str) and candidate in ok:
             return candidate
     return None

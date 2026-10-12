@@ -170,7 +170,13 @@ def update_study_lang(body: StudyLangIn, user: CurrentUser, session: SessionDep)
                 {"lang": value},
             )
     profile = dict(user.profile or {})
-    for key, value in (("studyLang", body.study_lang), ("uiLang", body.ui_lang)):
+    # Меняются только присланные поля: null убирает значение, отсутствие поля его не трогает.
+    for key, field, value in (
+        ("studyLang", "study_lang", body.study_lang),
+        ("uiLang", "ui_lang", body.ui_lang),
+    ):
+        if field not in body.model_fields_set:
+            continue
         if value is None:
             profile.pop(key, None)
         else:
