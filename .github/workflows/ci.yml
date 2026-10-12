@@ -9,8 +9,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     services:
+      # PostgreSQL 17 с AGE и pgvector (A-0024, A-0026): образ собирает суперпроект (deploy/postgres)
+      # и публикует в GHCR; в голом postgres этих расширений нет.
       postgres:
-        image: postgres:16
+        image: ghcr.io/chelowek054-lgtm/praxis-postgres:17
         env:
           POSTGRES_USER: praxis
           POSTGRES_PASSWORD: praxis
