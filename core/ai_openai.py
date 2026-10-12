@@ -33,6 +33,8 @@ _ATTEMPTS = 3
 
 class _NoToolCall(ProviderError):
     """Модель ответила, но инструмент не вызвала и вернуть структуру иначе не смогла: другая модель может справиться."""
+
+
 # Провайдер в тексте 402 сообщает, на сколько токенов хватает остатка.
 # У разных сервисов формулировка отличается — не совпало, значит запрос
 # честно падает с 402, а не молча продолжает.
@@ -113,7 +115,9 @@ class OpenAICompatibleGateway:
             except _NoToolCall:
                 if i == len(models) - 1:
                     raise
-        raise ProviderError(f"{model}: не удалось получить ответ")  # недостижимо: цикл выше возвращает или бросает
+        raise ProviderError(
+            f"{model}: не удалось получить ответ"
+        )  # недостижимо: цикл выше возвращает или бросает
 
     def _attempts(
         self, model: str, payload: dict[str, Any], tool_name: str, schema: dict[str, Any]
