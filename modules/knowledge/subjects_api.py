@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel
 
 from core.deps import CurrentUser, SessionDep
@@ -58,12 +58,17 @@ def list_subjects(user: CurrentUser, session: SessionDep) -> list[dict]:
 
 
 @router.post("/subjects", status_code=status.HTTP_201_CREATED)
-def add_subject(body: SubjectIn, user: CurrentUser, session: SessionDep) -> dict:
+def add_subject(
+    body: SubjectIn, user: CurrentUser, session: SessionDep, response: Response
+) -> dict:
     row = session.query(UserSubject).filter_by(user_id=user.id, domain=body.domain).one_or_none()
     if row is None:
         row = UserSubject(user_id=user.id, domain=body.domain, title=body.title, target=body.target)
         session.add(row)
         session.commit()
+    else:
+        # Повторное добавление не создаёт запись: отвечаем 200, а не 201 (T-0119, проверка 2026-10-11).
+        response.status_code = status.HTTP_200_OK
     return _view(row)
 
 
