@@ -104,9 +104,13 @@ def effective_graph(
 
     # Фильтр по домену обязателен: иначе свои узлы пользователя из других
     # областей подмешиваются в этот граф (баг до миграции 0006).
+    # Личные правки и освоенность канонического узла общие для всех его областей (R-0073).
     ucs = (
         session.query(UserConcept)
-        .filter(UserConcept.user_id == user_id, UserConcept.domain == domain)
+        .filter(
+            UserConcept.user_id == user_id,
+            (UserConcept.domain == domain) | UserConcept.base_concept_id.in_(list(concept_ids)),
+        )
         .all()
     )
     by_base = {uc.base_concept_id: uc for uc in ucs if uc.base_concept_id is not None}

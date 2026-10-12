@@ -156,16 +156,20 @@ def prerequisite_map(session: Session, domain: str) -> dict[uuid.UUID, list[uuid
 def load_map(session: Session, user_id: uuid.UUID, domain: str) -> dict[uuid.UUID, MasteryState]:
     """Освоенность по каждому узлу домена: записанная либо приор от предпосылок."""
     prereqs = prerequisite_map(session, domain)
-    rows = {
-        uc.base_concept_id: uc
-        for uc in session.query(UserConcept)
-        .filter(
-            UserConcept.user_id == user_id,
-            UserConcept.domain == domain,
-            UserConcept.base_concept_id.isnot(None),
-        )
-        .all()
-    }
+    # Освоенность общая для областей (R-0073): строка могла быть заведена в другой области понятия.
+    rows = (
+        {
+            uc.base_concept_id: uc
+            for uc in session.query(UserConcept)
+            .filter(
+                UserConcept.user_id == user_id,
+                UserConcept.base_concept_id.in_(list(prereqs)),
+            )
+            .all()
+        }
+        if prereqs
+        else {}
+    )
 
     states: dict[uuid.UUID, MasteryState] = {}
     for concept_id in _topological_order(prereqs):

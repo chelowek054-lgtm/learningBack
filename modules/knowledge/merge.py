@@ -475,7 +475,9 @@ def merge_domain(
         .filter(Concept.domain == domain, Concept.status != provenance.REJECTED)
         .all()
     )
-    report.embedded = embed_concepts(session, concepts, embedder)
+    # Партнёр по слиянию может жить в другой области (R-0073): векторы нужны всему графу, а не одной области.
+    everywhere = session.query(Concept).filter(Concept.status != provenance.REJECTED).all()
+    report.embedded = embed_concepts(session, everywhere, embedder)
     seen_pairs: set[str] = set()
     for concept in sorted(concepts, key=lambda c: c.title):
         if session.get(Concept, concept.id) is None:  # уже влит в другое

@@ -160,6 +160,9 @@ class Settings(BaseSettings):
     funnel_probe_fragments: int = 8
     funnel_quarantine_dropped: float = 0.8
     funnel_demote_dropped: float = 0.5
+    # Доля спорных утверждений источника, после которой он уходит в карантин (не меньше N утверждений).
+    funnel_quarantine_conflicts: float = 0.4
+    funnel_min_claims_for_conflicts: int = 10
     # Узел публикуется сам, если каждое утверждение подтверждено двумя источниками A/B.
     auto_publish: bool = True
     # Сопоставление области профиля с реестром (A-0031): от same — «уже есть», от maybe до same — спорно, решает модель.

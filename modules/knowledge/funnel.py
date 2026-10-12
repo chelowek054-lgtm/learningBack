@@ -8,9 +8,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
+import zlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -106,21 +106,28 @@ def text_quality(fragments: list[SourceFragment]) -> tuple[bool, str]:
 # ---- 3. дубли ----
 
 
-def _fragment_hashes(fragments: list[SourceFragment]) -> set[str]:
-    out = set()
-    for f in fragments:
-        norm = re.sub(r"\s+", " ", f.text.lower()).strip()
-        if len(norm) >= 120:
-            out.add(hashlib.sha1(norm[:2000].encode()).hexdigest())
+SHINGLE = 6  # слов в одном «отпечатке»
+SHINGLE_SAMPLE = 4  # берём каждый четвёртый отпечаток: хватает для сравнения и держит память малой
+
+
+def _shingles(fragments: list[SourceFragment]) -> set[int]:
+    """Выборка отпечатков текста: пара документов с мелкими правками (новое издание) делит большую их часть."""
+    out: set[int] = set()
+    for f in fragments[:600]:
+        words = re.sub(r"\s+", " ", f.text.lower()).split()
+        for i in range(0, max(0, len(words) - SHINGLE + 1)):
+            h = zlib.crc32(" ".join(words[i : i + SHINGLE]).encode())
+            if h % SHINGLE_SAMPLE == 0:
+                out.add(h)
     return out
 
 
 def duplicate_of(
     session: Session, doc: SourceDocument, fragments: list[SourceFragment]
 ) -> str | None:
-    """Название документа, чьи фрагменты совпадают с этим не менее чем на `funnel_dup_share`."""
-    mine = _fragment_hashes(fragments)
-    if not mine:
+    """Название документа, с которым этот делит не менее `funnel_dup_share` текста: точный дубль или почти-дубль."""
+    mine = _shingles(fragments)
+    if len(mine) < 20:
         return None
     others = (
         session.query(SourceDocument)
@@ -129,11 +136,10 @@ def duplicate_of(
     )
     for other in others:
         frags = session.query(SourceFragment).filter_by(document_id=other.id).all()
-        theirs = _fragment_hashes(frags)
+        theirs = _shingles(frags)
         if not theirs:
             continue
-        share = len(mine & theirs) / len(mine)
-        if share >= settings.funnel_dup_share:
+        if len(mine & theirs) / len(mine) >= settings.funnel_dup_share:
             return other.title
     return None
 
@@ -271,12 +277,48 @@ def after_extraction(doc: SourceDocument, concepts: int, dropped: int) -> None:
 def sole_support_is_weak(session: Session, claim_id) -> bool:
     """Утверждение опирается только на источники уровня C: в теорию в одиночку идти не может (R-0078)."""
     rows = (
-        session.query(SourceDocument.trust_tier)
+        session.query(SourceDocument.trust_tier, SourceDocument.quarantined)
         .join(SourceFragment, SourceFragment.document_id == SourceDocument.id)
         .join(ClaimSource, ClaimSource.fragment_id == SourceFragment.id)
         .filter(ClaimSource.claim_id == claim_id)
         .all()
     )
-    tiers = {r[0] for r in rows}
+    # Источник в карантине опорой не считается: как будто он уровня C.
+    tiers = {"C" if r[1] else r[0] for r in rows}
     # Без оценки (воронка не гонялась) источник слабым не считается: слабый — только явно уровня C.
     return bool(tiers) and tiers == {"C"}
+
+
+def after_reconcile(session: Session, domain: str) -> list[str]:
+    """Источник, у которого слишком много утверждений оказались спорными, уходит в карантин (T-0170)."""
+    from sqlalchemy import func
+
+    from modules.knowledge.models import Claim, Concept
+
+    rows = (
+        session.query(
+            SourceDocument,
+            func.count(func.distinct(Claim.id)),
+            func.count(func.distinct(Claim.id)).filter(Claim.status == "disputed"),
+        )
+        .join(SourceFragment, SourceFragment.document_id == SourceDocument.id)
+        .join(ClaimSource, ClaimSource.fragment_id == SourceFragment.id)
+        .join(Claim, Claim.id == ClaimSource.claim_id)
+        .join(Concept, Concept.id == Claim.concept_id)
+        .filter(Concept.domain == domain, SourceDocument.quarantined.is_(False))
+        .group_by(SourceDocument.id)
+        .all()
+    )
+    hit: list[str] = []
+    for doc, total, disputed in rows:
+        if total >= settings.funnel_min_claims_for_conflicts and disputed / total >= (
+            settings.funnel_quarantine_conflicts
+        ):
+            doc.quarantined = True
+            doc.trust_reasons = [
+                *(doc.trust_reasons or []),
+                f"много противоречий: {disputed} из {total} утверждений спорные",
+            ]
+            hit.append(str(doc.id))
+    session.flush()
+    return hit
