@@ -14,6 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from modules.knowledge import cross_links, domains
+from modules.knowledge.areas import area_concepts
 from modules.knowledge.models import Concept, Domain
 
 INTUITIVE_BLOOM = "understand"
@@ -31,7 +32,7 @@ def _built_counts(session: Session) -> dict[str, int]:
 def _variant(
     session: Session, domain: str, bloom: str, built: dict[str, int], chain_keys: list[str]
 ) -> dict:
-    goal_ids = [c.id for c in session.query(Concept).filter(Concept.domain == domain).all()]
+    goal_ids = [c.id for c in area_concepts(session, domain)]
     levels = domains.levels(session)
     if goal_ids:
         # Цель уже построена: считаем точно — только нужные предки на этой ступени.

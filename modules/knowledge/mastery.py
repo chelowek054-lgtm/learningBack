@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from modules.knowledge.assessment import BLOOM_LEVELS
-from modules.knowledge.models import Concept, ConceptEdge, UserConcept
+from modules.knowledge.areas import area_concepts
+from modules.knowledge.models import ConceptEdge, UserConcept
 
 # Ребра, по которым узел считается предпосылкой другого.
 PREREQ_EDGE_TYPES = ("prereq", "specializes")
@@ -143,7 +144,7 @@ def status_for(state: MasteryState, prerequisites_known: bool) -> str:
 
 def prerequisite_map(session: Session, domain: str) -> dict[uuid.UUID, list[uuid.UUID]]:
     """concept_id → список его предпосылок внутри домена."""
-    ids = {c.id for c in session.query(Concept).filter(Concept.domain == domain).all()}
+    ids = {c.id for c in area_concepts(session, domain)}
     result: dict[uuid.UUID, list[uuid.UUID]] = {i: [] for i in ids}
     edges = session.query(ConceptEdge).filter(ConceptEdge.type.in_(PREREQ_EDGE_TYPES)).all()
     for e in edges:

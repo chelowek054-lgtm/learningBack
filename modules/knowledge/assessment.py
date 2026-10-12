@@ -48,6 +48,8 @@ class AssessmentItem(BaseModel):
     options: list[Option] = Field(default_factory=list)
     criteria: list[str] = Field(default_factory=list)
     grounded_in: str = ""
+    # Ответ сверяется со строкой `expected` без модели (пропуск из готового банка заданий, R-0075).
+    exact: bool = False
 
 
 class AssessmentPayload(BaseModel):

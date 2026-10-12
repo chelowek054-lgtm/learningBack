@@ -52,6 +52,15 @@ class ProfileIn(BaseModel):
     profile: dict[str, Any]
 
 
+class StudyLangIn(BaseModel):
+    """Язык изучения (T-0174); None — как у интерфейса."""
+
+    study_lang: str | None = Field(default=None, alias="studyLang", max_length=8)
+    ui_lang: str | None = Field(default=None, alias="uiLang", max_length=8)
+
+    model_config = {"populate_by_name": True}
+
+
 # --- Sync (WS2) --- camelCase на проводе (совпадает с клиентскими типами ядра).
 
 

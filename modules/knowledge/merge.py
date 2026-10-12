@@ -26,6 +26,7 @@ from core.config import settings
 from core.embeddings import Embedder, get_embedder
 from core.models import Job
 from modules.knowledge import provenance
+from modules.knowledge.areas import in_area
 from modules.knowledge.models import (
     Assessment,
     Concept,
@@ -381,7 +382,7 @@ def find_prereq_cycle(session: Session, domain: str) -> list[uuid.UUID] | None:
     edges = (
         session.query(ConceptEdge)
         .join(Concept, Concept.id == ConceptEdge.from_id)
-        .filter(Concept.domain == domain, ConceptEdge.type == "prereq")
+        .filter(in_area(domain), ConceptEdge.type == "prereq")
         .all()
     )
     graph: dict[uuid.UUID, list[uuid.UUID]] = {}

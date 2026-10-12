@@ -18,6 +18,7 @@ from modules.knowledge import cross_links, domains
 from modules.knowledge.assessment_store import get_or_generate
 from modules.knowledge.assessment import NotGroundable
 from modules.knowledge.mastery import KNOWN_THRESHOLD, MasteryState, load_map
+from modules.knowledge.areas import area_concepts
 from modules.knowledge.models import Concept
 from modules.knowledge.placement import (
     CENTRALITY_WEIGHT,
@@ -36,7 +37,7 @@ UNKNOWN = "unknown"
 
 def needed_nodes(session: Session, domain: str, target_bloom: str) -> dict[uuid.UUID, str]:
     """Понятия других областей, нужные для цели в `domain` на ступени `target_bloom`."""
-    goal = [c.id for c in session.query(Concept).filter(Concept.domain == domain).all()]
+    goal = [c.id for c in area_concepts(session, domain)]
     return cross_links.required_ancestors(session, goal, target_bloom)
 
 

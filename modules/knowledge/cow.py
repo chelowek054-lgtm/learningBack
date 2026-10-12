@@ -9,6 +9,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from modules.knowledge.content import ensure_shape
+from modules.knowledge.areas import area_concepts, area_meta
+from modules.knowledge.localize import localize_content, term_titles
 from modules.knowledge.models import Concept, ConceptEdge, UserConcept, UserEdge
 
 
@@ -26,9 +28,23 @@ def _lighten(node: dict[str, Any], light: bool) -> dict[str, Any]:
     return node
 
 
-def resolve_node(c: Concept | None, uc: UserConcept | None, light: bool = False) -> dict[str, Any]:
-    """Эффективный узел: канон + персональный оверрайд, либо свой персональный узел."""
-    return _lighten(_resolve(c, uc), light)
+def resolve_node(
+    c: Concept | None,
+    uc: UserConcept | None,
+    light: bool = False,
+    lang: str | None = None,
+    titles: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Эффективный узел: канон + персональный оверрайд, либо свой персональный узел.
+
+    С `lang` теория и название берутся на языке изучения (T-0174), если перевод есть.
+    """
+    node = _resolve(c, uc)
+    if lang and node["kind"] == "canonical":
+        node["content"] = localize_content(node["content"], lang)
+        if titles and node["id"] in titles:
+            node["title"] = titles[node["id"]]
+    return _lighten(node, light)
 
 
 def _resolve(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
@@ -77,13 +93,13 @@ def _resolve(c: Concept | None, uc: UserConcept | None) -> dict[str, Any]:
 
 
 def effective_graph(
-    session: Session, user_id: uuid.UUID, domain: str, light: bool = True
+    session: Session, user_id: uuid.UUID, domain: str, light: bool = True, lang: str | None = None
 ) -> dict[str, Any]:
     """Граф пользователя в домене: наследованный канон + персональные правки/ветки.
 
     По умолчанию облегчённый — без полной теории узлов (см. `_lighten`).
     """
-    concepts = session.query(Concept).filter(Concept.domain == domain).all()
+    concepts = area_concepts(session, domain)
     concept_ids = {c.id for c in concepts}
 
     # Фильтр по домену обязателен: иначе свои узлы пользователя из других
@@ -96,7 +112,14 @@ def effective_graph(
     by_base = {uc.base_concept_id: uc for uc in ucs if uc.base_concept_id is not None}
     own = [uc for uc in ucs if uc.base_concept_id is None]
 
-    nodes = [resolve_node(c, by_base.get(c.id), light) for c in concepts]
+    titles = term_titles(session, [c.id for c in concepts], lang)
+    nodes = [resolve_node(c, by_base.get(c.id), light, lang, titles) for c in concepts]
+    # этап и уровень понятия — для этой области, а не из «домашней» (R-0073)
+    meta = area_meta(session, domain)
+    for node in nodes:
+        row = meta.get(uuid.UUID(node["id"]))
+        if row:
+            node.update(row)
     nodes += [resolve_node(None, uc, light) for uc in own]
 
     edges: list[dict[str, Any]] = []

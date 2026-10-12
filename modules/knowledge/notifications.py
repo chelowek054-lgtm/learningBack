@@ -15,15 +15,22 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from core import push
-from core.models import Activity, Job
+from core.messages import msg, user_lang
+from core.models import Activity, Job, User
 
 from modules.knowledge import provenance
+from modules.knowledge.areas import in_area
 from modules.knowledge.models import Concept, Course, Notification
 
 READY, EXTENDED = "course_ready", "course_extended"
 VERIFIED, CHANGED = "concept_verified", "concept_changed"
 MAX_NAMED = 3  # сколько названий понятий перечислять в тексте, остальные — «и ещё N»
-UNVERIFIED = "Не проверено специалистом: содержание собрано автоматически."
+UNVERIFIED = msg("ru", "unverified")  # для проверок и старого кода
+
+
+def _lang(session: Session, user_id: uuid.UUID) -> str:
+    user = session.get(User, user_id)
+    return user_lang(user.profile if user else None)
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:
@@ -55,13 +62,14 @@ def push_job(session: Session, job: Job, gateway: Any) -> dict[str, Any]:
         raise ValueError("Уведомление не найдено")
     if note.read_at is not None:
         return {"sent": 0, "skipped": "already_read"}
+    lang = _lang(session, note.user_id)
     return push.deliver(
         session,
         note.user_id,
         lambda token: {
             "to": token,
             "title": note.title,
-            "body": f"Область: {note.domain}",
+            "body": msg(lang, "push.area", domain=note.domain),
             "sound": "default",
             "data": {"notificationId": str(note.id), "kind": note.kind, "domain": note.domain},
         },
@@ -79,14 +87,15 @@ def course_ready(
     )
     if exists is not None:
         return None
-    body = f"В курсе {steps} {_plural(steps, 'шаг', 'шага', 'шагов')}, можно приступать."
+    lang = _lang(session, user_id)
+    body = msg(lang, "course.ready.body", steps)
     if drafts:
-        body += f" {UNVERIFIED} Черновых шагов: {drafts}."
+        body += f" {msg(lang, 'unverified')} {msg(lang, 'course.ready.drafts', drafts=drafts)}"
     note = Notification(
         user_id=user_id,
         kind=READY,
         domain=domain,
-        title="Курс готов",
+        title=msg(lang, "course.ready.title"),
         body=body,
         data={"steps": steps, "drafts": drafts},
     )
@@ -117,12 +126,11 @@ def course_extended(session: Session, domain: str, added: int, drafts: int) -> i
         total = int((note.data or {}).get("added", 0)) + added
         unverified = int((note.data or {}).get("drafts", 0)) + drafts
         note.data = {"added": total, "drafts": unverified}
-        note.title = "Курс дополнен"
-        note.body = (
-            f"В область добавлено {total} {_plural(total, 'понятие', 'понятия', 'понятий')}."
-        )
+        lang = _lang(session, uid)
+        note.title = msg(lang, "course.extended.title")
+        note.body = msg(lang, "course.extended.body", total)
         if unverified:
-            note.body += f" {UNVERIFIED} Из них черновых: {unverified}."
+            note.body += f" {msg(lang, 'unverified')} {msg(lang, 'course.extended.drafts', drafts=unverified)}"
         note.created_at = datetime.now(timezone.utc)
     session.flush()
     for note in fresh:  # push — только о новом уведомлении: накопление непрочитанного молчит
@@ -137,7 +145,7 @@ def draft_count(session: Session, domain: str, concept_ids: list[uuid.UUID]) -> 
         session.query(Concept)
         .filter(
             Concept.id.in_(concept_ids),
-            Concept.domain == domain,
+            in_area(domain),
             Concept.status == provenance.DRAFT,
         )
         .count()
@@ -196,10 +204,10 @@ def _learners(
     return [(uid, domain) for uid, domain in q.all()]
 
 
-def _names(entries: list[dict[str, Any]]) -> str:
+def _names(entries: list[dict[str, Any]], lang: str) -> str:
     shown = ", ".join(f"«{e['title']}»" for e in entries[:MAX_NAMED])
     rest = len(entries) - MAX_NAMED
-    return shown + (f" и ещё {rest}" if rest > 0 else "")
+    return msg(lang, "names.more", shown=shown, rest=rest) if rest > 0 else shown
 
 
 def _collect(
@@ -222,16 +230,14 @@ def _collect(
     entries = list((note.data or {}).get("concepts", []))
     entries = [e for e in entries if e["id"] != entry["id"]] + [entry]
     note.data = {"concepts": entries}
+    lang = _lang(session, user_id)
     if kind == VERIFIED:
-        note.title = "Понятие проверено"
-        note.body = f"Специалист проверил: {_names(entries)}. Пометка «Черновик» снята."
+        note.title = msg(lang, "concept.verified.title")
+        note.body = msg(lang, "concept.verified.body", names=_names(entries, lang))
     else:
-        note.title = "Понятие изменено"
-        what = entries[-1].get("what") or "изменено изложение"
-        note.body = (
-            f"В понятиях, которые вы уже прошли, изменился смысл: {_names(entries)}. "
-            f"{what[:200]}. Рекомендуем повторить шаг."
-        )
+        note.title = msg(lang, "concept.changed.title")
+        what = entries[-1].get("what") or msg(lang, "concept.changed.what")
+        note.body = msg(lang, "concept.changed.body", names=_names(entries, lang), what=what[:200])
     note.created_at = datetime.now(timezone.utc)
     if is_new:
         session.flush()

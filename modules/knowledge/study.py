@@ -29,6 +29,7 @@ from modules.knowledge.assessment import AssessmentItem, NotGroundable
 from modules.knowledge.assessment_store import get_or_generate
 from modules.knowledge.content import NodeContent, coerce_content
 from modules.knowledge.course import mark_completed
+from modules.knowledge.localize import localize_content, title_of
 from modules.knowledge.mastery import KNOWN_THRESHOLD, MasteryState, load_map
 from modules.knowledge.models import Concept, Course
 from modules.knowledge.placement import record_answer
@@ -58,7 +59,7 @@ def _step_of(course: Course, concept_id: str) -> dict[str, Any] | None:
 
 
 def start_step(
-    session: Session, user_id: uuid.UUID, course: Course, concept_id: str
+    session: Session, user_id: uuid.UUID, course: Course, concept_id: str, lang: str | None = None
 ) -> list[Activity]:
     """Развернуть шаг курса в активности движка (идемпотентно)."""
     step = _step_of(course, concept_id)
@@ -103,7 +104,7 @@ def start_step(
             if node_id == concept_id
             else NodeContent.model_validate(coerce_content(node.content))
         )
-        payload = _payload(session, node, node_content, activity_type, planned["bloom"])
+        payload = _payload(session, node, node_content, activity_type, planned["bloom"], lang)
         if payload is None:
             continue  # заданий по этому узлу не сгенерировать — активность пропускаем
         activity = Activity(
@@ -154,6 +155,7 @@ def _payload(
     content: NodeContent,
     activity_type: str,
     bloom: str,
+    lang: str | None = None,
 ) -> dict[str, Any] | None:
     base = {
         # domain кладём в payload, чтобы рендерер был самодостаточен: он получает
@@ -161,21 +163,22 @@ def _payload(
         "domain": concept.domain,
         "conceptId": str(concept.id),
         "conceptVersion": concept.version,
-        "title": concept.title,
+        "title": title_of(session, concept, lang),
         "bloom": bloom,
         # «проверено» или «черновик» (R-0044): экран узла честно помечает непроверенное. Источника
         # здесь нет и быть не должно (R-0045); статус на момент начала шага.
         "status": "verified" if concept.status == "approved" else "draft",
     }
     if activity_type == "concept_study":
-        return {**base, "content": content.model_dump()}
+        shown = localize_content(content.model_dump(), lang)
+        return {**base, "content": shown}
 
     kind = _ACTIVITY_KIND.get(activity_type)
     if kind is None:
         # Тип чужого способа: задание строит модуль, который его объявил.
         return modules.payload_for(activity_type, {**base, "content": content.model_dump()})
     try:
-        payload, _cached = get_or_generate(session, concept, bloom, kind)
+        payload, _cached = get_or_generate(session, concept, bloom, kind, lang=lang)
     except (NotGroundable, ValueError):
         return None
     item = payload.items[0]

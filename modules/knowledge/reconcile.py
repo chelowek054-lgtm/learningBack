@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.models import Job
-from modules.knowledge import provenance
+from modules.knowledge import freshness, provenance
 from modules.knowledge.models import (
     Claim,
     ClaimConflict,
@@ -185,6 +185,20 @@ def reconcile_concept(session: Session, concept: Concept, gateway, report: Recon
             _add_sources(session, claim, target)
             session.delete(claim)
             report.merged += 1
+        elif (
+            verdict == "contradicts"
+            and target is not None
+            and claim.volatility == "fast"
+            and target.volatility == "fast"
+            and claim.as_of is not None
+            and target.as_of is not None
+            and claim.as_of > target.as_of
+        ):
+            # Быстро устаревающее: более свежая дата источника заменяет прежнее без пула (T-0163).
+            target.status = "replaced"
+            target.replaced_by = claim.id
+            _accept(claim)
+            report.accepted += 1
         elif verdict == "contradicts" and target is not None:
             claim.status = "disputed"
             session.add(
@@ -347,6 +361,11 @@ def resolve(
     else:  # disputed: обе позиции остаются, в теорию идёт только принятое
         b.status = "disputed"
     cf.status, cf.resolution, cf.resolved_by, cf.note = "resolved", resolution, user_id, note[:500]
+    # Источники проигравшего утверждения теряют доверие (T-0167).
+    if resolution == "a":
+        freshness.record_lost_dispute(session, b)
+    elif resolution == "b":  # «устарело» — не вина источника, доверие не меняем
+        freshness.record_lost_dispute(session, a)
     session.add(
         ReviewLog(
             target_type="claim_conflict",

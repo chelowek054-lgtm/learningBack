@@ -27,6 +27,7 @@ from modules.knowledge.mastery import (
     status_for,
     update,
 )
+from modules.knowledge.areas import area_concepts
 from modules.knowledge.models import Concept
 
 PROBE_KIND = "probe"
@@ -63,7 +64,7 @@ def rank_candidates(
     session: Session, user_id: uuid.UUID, domain: str
 ) -> list[tuple[Concept, MasteryState, float]]:
     """Узлы границы, отсортированные по «сколько даст ответ»."""
-    concepts = {c.id: c for c in session.query(Concept).filter(Concept.domain == domain).all()}
+    concepts = {c.id: c for c in area_concepts(session, domain)}
     prereqs = prerequisite_map(session, domain)
     states = load_map(session, user_id, domain)
 
@@ -87,7 +88,7 @@ def next_probe(
     """Следующий зонд: узел границы + задание из кэша (или сгенерированное)."""
     candidates = rank_candidates(session, user_id, domain)
     if not candidates:
-        if not session.query(Concept).filter(Concept.domain == domain).first():
+        if not next(iter(area_concepts(session, domain)), None):
             raise NoProbeAvailable(f"граф «{domain}» пуст", "empty")
         raise NoProbeAvailable("всё, что можно было уточнить, уже уточнено", "settled")
 
@@ -132,7 +133,7 @@ def record_answer(
 
 def placement_map(session: Session, user_id: uuid.UUID, domain: str) -> dict[str, Any]:
     """Карта освоенности: где пользователь, где граница, что закрыто."""
-    concepts = {c.id: c for c in session.query(Concept).filter(Concept.domain == domain).all()}
+    concepts = {c.id: c for c in area_concepts(session, domain)}
     prereqs = prerequisite_map(session, domain)
     states = load_map(session, user_id, domain)
 
