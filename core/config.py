@@ -140,6 +140,28 @@ class Settings(BaseSettings):
     merge_candidates: int = 5
     merge_min_similarity: float = 0.6
     merge_max_judgements: int = 200
+    # Не ниже этой близости и совпавшее имя — то же понятие без вопроса к модели (R-0074).
+    merge_auto_similarity: float = 0.92
+    # Языки графа через запятую: основной первым (A-0034).
+    graph_languages: str = "en,ru"
+    # Воронка отсева источников (R-0072, R-0078): лицензия, объём, качество, дубли, тема, метрики.
+    # Выключатель воронки: тесты и ручной разбор доверенных материалов идут без неё.
+    funnel_enabled: bool = True
+    sources_require_license: bool = True
+    source_licenses_allowed: str = (
+        "public-domain,pd,cc0,cc-by,cc-by-3.0,cc-by-4.0,cc-by-sa,cc-by-sa-3.0,cc-by-sa-4.0,"
+        "mit,apache-2.0,bsd,bsd-3-clause,open,owned,permission"
+    )
+    funnel_min_chars: int = 5000
+    funnel_max_noise: float = 0.08
+    funnel_min_avg_fragment: int = 200
+    funnel_dup_share: float = 0.5
+    funnel_topic_min: float = 0.25
+    funnel_probe_fragments: int = 8
+    funnel_quarantine_dropped: float = 0.8
+    funnel_demote_dropped: float = 0.5
+    # Узел публикуется сам, если каждое утверждение подтверждено двумя источниками A/B.
+    auto_publish: bool = True
     # Сопоставление области профиля с реестром (A-0031): от same — «уже есть», от maybe до same — спорно, решает модель.
     area_same_similarity: float = 0.82
     area_maybe_similarity: float = 0.70

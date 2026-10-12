@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+from datetime import datetime, timedelta
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -27,10 +28,16 @@ from core import materials
 from core.config import settings
 from core.models import Job
 from core.objects import ObjectStore, get_store
-from modules.knowledge import provenance
+from modules.knowledge import funnel, langs, provenance
 from modules.knowledge.models import (
+    CLAIM_KINDS,
+    VOLATILITY,
+    Claim,
+    ClaimSource,
     Concept,
+    ConceptArea,
     ConceptEdge,
+    ConceptTerm,
     SourceDocument,
     SourceFragment,
 )
@@ -77,6 +84,38 @@ EXTRACT_SCHEMA: dict[str, Any] = {
                         "description": "дословная цитата из одного из этих фрагментов, 1-2 предложения",
                     },
                     "confidence": {"type": "number"},
+                    "title_ru": {"type": "string", "description": "название понятия по-русски"},
+                    "summary_ru": {"type": "string", "description": "то же изложение по-русски"},
+                    "claims": {
+                        "type": "array",
+                        "description": "атомарные утверждения о понятии, каждое со своей цитатой",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string", "enum": list(CLAIM_KINDS)},
+                                "text": {
+                                    "type": "string",
+                                    "description": "утверждение на английском",
+                                },
+                                "text_ru": {"type": "string", "description": "то же по-русски"},
+                                "sources": {"type": "array", "items": {"type": "integer"}},
+                                "quote": {
+                                    "type": "string",
+                                    "description": "дословная цитата из этих фрагментов на языке источника",
+                                },
+                                "volatility": {
+                                    "type": "string",
+                                    "enum": list(VOLATILITY),
+                                    "description": "stable — не устаревает; slow — пересмотр раз в 2-3 года; fast — версии, цифры, нормы",
+                                },
+                                "applicability": {
+                                    "type": "string",
+                                    "description": "условия, при которых верно (версия, год, допущение); пусто, если безусловно",
+                                },
+                            },
+                            "required": ["kind", "text", "sources", "quote"],
+                        },
+                    },
                 },
                 "required": ["key", "title", "summary", "sources", "quote"],
             },
@@ -182,7 +221,9 @@ def windows(fragments: list[SourceFragment], size: int) -> list[list[SourceFragm
     return out
 
 
-def prompt_for(window: list[SourceFragment], domain: str, doc_title: str) -> str:
+def prompt_for(
+    window: list[SourceFragment], domain: str, doc_title: str, lang: str | None = None
+) -> str:
     body = "\n\n".join(
         f"[Фрагмент {i}] (стр. {f.page or '?'}"
         + (f", {f.heading}" if f.heading else "")
@@ -202,7 +243,16 @@ def prompt_for(window: list[SourceFragment], domain: str, doc_title: str) -> str
         "без объяснения;\n"
         "- связи: prereq (без A не понять B), specializes, part_of, related, contrasts, misconception, "
         "example; у связи sources — фрагменты, где это видно; в from и to — key понятий этого же ответа;\n"
-        "- если во фрагментах нет объяснений понятий, верни пустые списки.\n\n" + body
+        "- если во фрагментах нет объяснений понятий, верни пустые списки;\n"
+        "- title и summary пиши на английском (канонический язык графа), title_ru и summary_ru — по-русски; "
+        "key — латиницей из английского названия;\n"
+        "- claims: 2-8 атомарных утверждений о понятии (одно утверждение — один факт: определение, свойство, "
+        "формула, условие, пример, типичная ошибка); text на английском, text_ru по-русски, quote — "
+        "ДОСЛОВНАЯ цитата на языке источника из фрагментов, указанных в sources; без цитаты утверждение "
+        "будет отброшено; volatility — как быстро факт устаревает; applicability — условия, если они есть.\n"
+        + (f"Язык источника: {lang}.\n" if lang else "")
+        + "\n"
+        + body
     )
 
 
@@ -229,11 +279,84 @@ def _key(raw: Any, title: str) -> str:
     return "c_" + uuid.uuid5(uuid.NAMESPACE_URL, title.lower()).hex[:10]
 
 
+def locate(
+    quote: str, fragments: list[SourceFragment]
+) -> tuple[SourceFragment, int | None, int | None] | None:
+    """Фрагмент, где нашлась цитата, и смещения в его тексте (None, если цитата найдена лишь с нормализацией)."""
+    q = quote.strip()
+    if not q:
+        return None
+    words = [re.escape(w) for w in q[:MAX_QUOTE].split()]
+    if len(" ".join(words)) < MIN_QUOTE:
+        return None
+    pattern = re.compile(r"\s+".join(words), re.IGNORECASE)
+    for f in fragments:
+        m = pattern.search(f.text)
+        if m:
+            return f, m.start(), m.end()
+    for f in fragments:
+        if quote_found(q, [f.text]):
+            return f, None, None
+    return None
+
+
 @dataclass
 class Cleaned:
     concepts: list[dict[str, Any]] = field(default_factory=list)
     edges: list[dict[str, Any]] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)
+
+
+def _clean_claims(
+    item: dict[str, Any], summary: str, cited: list[SourceFragment]
+) -> list[dict[str, Any]]:
+    """Утверждения понятия с найденной цитатой; ответ без `claims` (старый формат) даёт одно утверждение из изложения."""
+    raw_claims = item.get("claims")
+    if not isinstance(raw_claims, list):
+        found = locate(str(item.get("quote") or ""), cited)
+        if found is None:
+            return []
+        frag, start, end = found
+        return [
+            {
+                "kind": "definition",
+                "text": summary,
+                "text_ru": "",
+                "quote": str(item.get("quote") or "").strip()[:MAX_QUOTE],
+                "fragment": frag,
+                "start": start,
+                "end": end,
+                "volatility": "stable",
+                "applicability": None,
+            }
+        ]
+    out: list[dict[str, Any]] = []
+    for c in raw_claims:
+        if not isinstance(c, dict):
+            continue
+        text = str(c.get("text") or "").strip()
+        idx = [i for i in c.get("sources") or [] if isinstance(i, int)]
+        scope = [cited_f for cited_f in cited] if not idx else cited
+        found = locate(str(c.get("quote") or ""), scope)
+        if not text or found is None:
+            continue
+        frag, start, end = found
+        out.append(
+            {
+                "kind": c.get("kind") if c.get("kind") in CLAIM_KINDS else "property",
+                "text": text,
+                "text_ru": str(c.get("text_ru") or "").strip(),
+                "quote": str(c.get("quote") or "").strip()[:MAX_QUOTE],
+                "fragment": frag,
+                "start": start,
+                "end": end,
+                "volatility": c.get("volatility")
+                if c.get("volatility") in VOLATILITY
+                else "stable",
+                "applicability": (str(c.get("applicability") or "").strip() or None),
+            }
+        )
+    return out
 
 
 def clean_extraction(raw: Any, window: list[SourceFragment]) -> Cleaned:
@@ -258,9 +381,14 @@ def clean_extraction(raw: Any, window: list[SourceFragment]) -> Cleaned:
         if not summary:
             out.dropped.append(f"{title}: нет изложения")
             continue
+        claims = _clean_claims(item, summary, cited)
+        if not claims:
+            out.dropped.append(f"{title}: нет утверждений с найденной цитатой")
+            continue
         key = _key(item.get("key"), title)
         if key in seen:  # повтор внутри окна: источники складываем
             seen[key]["fragments"] += [f for f in cited if f not in seen[key]["fragments"]]
+            seen[key]["claims"] += claims
             continue
         confidence = item.get("confidence")
         confidence = float(confidence) if isinstance(confidence, int | float) else 0.5
@@ -275,6 +403,9 @@ def clean_extraction(raw: Any, window: list[SourceFragment]) -> Cleaned:
             ],
             "confidence": round(max(0.0, min(MAX_CONFIDENCE, confidence)), 2),
             "fragments": cited,
+            "title_ru": str(item.get("title_ru") or "").strip()[:200],
+            "summary_ru": str(item.get("summary_ru") or "").strip(),
+            "claims": claims,
         }
         seen[key] = concept
         out.concepts.append(concept)
@@ -311,7 +442,9 @@ def _content(c: dict[str, Any]) -> dict[str, Any]:
     return {"summary": c["summary"], "sections": [section], "references": []}
 
 
-def save(session: Session, domain: str, cleaned: Cleaned) -> tuple[int, int]:
+def save(
+    session: Session, domain: str, cleaned: Cleaned, as_of: datetime | None = None
+) -> tuple[int, int]:
     """Понятия и связи окна в граф как черновики. Вернуть (новых понятий, новых связей)."""
     by_key: dict[str, Concept] = {}
     new_concepts = new_edges = 0
@@ -335,6 +468,7 @@ def save(session: Session, domain: str, cleaned: Cleaned) -> tuple[int, int]:
             new_concepts += 1
         by_key[c["key"]] = concept
         provenance.link_concept(session, concept, [f.id for f in c["fragments"]])
+        _save_claims(session, concept, c, as_of)
     for e in cleaned.edges:
         a, b = by_key[e["from"]], by_key[e["to"]]
         edge = (
@@ -349,6 +483,79 @@ def save(session: Session, domain: str, cleaned: Cleaned) -> tuple[int, int]:
             new_edges += 1
         provenance.link_edge(session, edge, [f.id for f in e["fragments"]])
     return new_concepts, new_edges
+
+
+_REVIEW_DAYS = {"slow": 365 * 2, "fast": 270}
+
+
+def _save_claims(
+    session: Session, concept: Concept, c: dict[str, Any], as_of: datetime | None
+) -> None:
+    """Утверждения, термины и область понятия; одинаковое утверждение получает ещё один источник."""
+    existing = {
+        " ".join(x.text.lower().split()): x
+        for x in session.query(Claim).filter_by(concept_id=concept.id).all()
+    }
+    for cl in c.get("claims") or []:
+        key = " ".join(cl["text"].lower().split())
+        claim = existing.get(key)
+        if claim is None:
+            days = _REVIEW_DAYS.get(cl["volatility"])
+            claim = Claim(
+                concept_id=concept.id,
+                kind=cl["kind"],
+                text=cl["text"],
+                text_i18n={"en": cl["text"], **({"ru": cl["text_ru"]} if cl["text_ru"] else {})},
+                status="proposed",
+                applicability=cl["applicability"],
+                volatility=cl["volatility"],
+                as_of=as_of,
+                review_after=(as_of + timedelta(days=days)) if as_of and days else None,
+            )
+            session.add(claim)
+            session.flush()
+            existing[key] = claim
+        frag = cl["fragment"]
+        if (
+            session.query(ClaimSource).filter_by(claim_id=claim.id, fragment_id=frag.id).first()
+            is None
+        ):
+            session.add(
+                ClaimSource(
+                    claim_id=claim.id,
+                    fragment_id=frag.id,
+                    quote=cl["quote"],
+                    char_start=cl["start"],
+                    char_end=cl["end"],
+                    verified=True,
+                )
+            )
+    for lang, term in (("en", concept.title), ("ru", c.get("title_ru") or "")):
+        term = term.strip()
+        if term and (
+            session.query(ConceptTerm)
+            .filter_by(concept_id=concept.id, lang=lang, term=term)
+            .first()
+            is None
+        ):
+            session.add(
+                ConceptTerm(concept_id=concept.id, lang=lang, term=term, primary=(lang == "en"))
+            )
+    if (
+        session.query(ConceptArea).filter_by(concept_id=concept.id, domain=concept.domain).first()
+        is None
+    ):
+        session.add(
+            ConceptArea(
+                concept_id=concept.id,
+                domain=concept.domain,
+                stage=concept.stage,
+                stage_order=concept.stage_order,
+                level=concept.level,
+                optional=bool(concept.optional),
+            )
+        )
+    session.flush()
 
 
 # ---- разбор целого документа ----
@@ -374,6 +581,8 @@ def ingest(
 
     data = (store or get_store()).get(doc.object_key)
     fragments = parse_document(session, doc, meta.get("filename") or doc.title, data)
+    if doc.lang is None:
+        doc.lang = langs.detect_lang(" ".join(f.text for f in fragments[:60]))
     limit = max_windows if max_windows is not None else settings.ingest_max_windows
     plan = windows(fragments, settings.ingest_window_fragments)[:limit]
     state.setdefault("windows", len(plan))
@@ -388,7 +597,7 @@ def ingest(
             "submit_concepts",
             "Вернуть понятия и связи, найденные во фрагментах источника.",
             EXTRACT_SCHEMA,
-            prompt_for(window, doc.domain, doc.title),
+            prompt_for(window, doc.domain, doc.title, doc.lang),
         )
 
     pending = [(n, w) for n, w in enumerate(plan) if n >= state["done"]]
@@ -415,7 +624,7 @@ def ingest(
                     break  # окна после сбойного не сохраняем: повтор продолжит с него
         for (number, window), raw in zip(chunk, answers, strict=False):
             cleaned = clean_extraction(raw, window)
-            c, e = save(session, doc.domain, cleaned)
+            c, e = save(session, doc.domain, cleaned, doc.created_at)
             state["concepts"] += c
             state["edges"] += e
             state["dropped"] += len(cleaned.dropped)
@@ -426,6 +635,7 @@ def ingest(
             raise failure
 
     state["status"] = "done"
+    funnel.after_extraction(doc, int(state["concepts"]), int(state["dropped"]))
     doc.meta = {**meta, "ingest": state}
     session.flush()
     return state
@@ -444,6 +654,16 @@ def enqueue_ingest(session: Session, doc: SourceDocument, user_id: uuid.UUID) ->
     return job
 
 
+def screen(session: Session, doc: SourceDocument, gateway) -> funnel.Screening:
+    """Воронка отсева до извлечения: отказ не тратит ни одного запроса на разбор."""
+    if not doc.object_key:
+        raise ValueError("Файл документа не сохранён в хранилище")
+    meta = dict(doc.meta or {})
+    data = get_store().get(doc.object_key)
+    fragments = parse_document(session, doc, meta.get("filename") or doc.title, data)
+    return funnel.screen(session, doc, fragments, gateway)
+
+
 def ingest_job(session: Session, job: Job, gateway) -> dict[str, Any]:
     """Обработчик job: ValueError — навсегда (нет документа), остальное — временный сбой, повтор."""
     raw_id = (job.input_ref or {}).get("documentId")
@@ -453,6 +673,14 @@ def ingest_job(session: Session, job: Job, gateway) -> dict[str, Any]:
         raise ValueError("documentId некорректен") from e
     if doc is None:
         raise ValueError("Документ не найден")
+    if doc.quarantined:
+        return {"status": "rejected", "reasons": list(doc.trust_reasons or [])}
+    screening = screen(session, doc, gateway)
+    if not screening.ok:
+        meta = dict(doc.meta or {})
+        doc.meta = {**meta, "ingest": {"status": "rejected", "reasons": screening.reasons}}
+        session.flush()
+        return {"status": "rejected", "step": screening.step, "reasons": screening.reasons}
     state = ingest(session, doc, gateway)
     if not state.get("skipped") and state.get("concepts") and doc.domain:
         # Новые понятия могут дублировать уже стоящие: слияние области идёт следующей задачей.

@@ -24,6 +24,8 @@ class Section(BaseModel):
     body: str = ""
     examples: list[str] = Field(default_factory=list)
     counter_examples: list[str] = Field(default_factory=list)
+    # Утверждения, на которых стоит раздел (T-0159): через них — к месту в источнике.
+    claims: list[str] = Field(default_factory=list)
 
 
 class Reference(BaseModel):
@@ -40,6 +42,10 @@ class NodeContent(BaseModel):
     summary: str = ""
     sections: list[Section] = Field(default_factory=list)
     references: list[Reference] = Field(default_factory=list)
+    # Тексты на других языках: {код языка: {summary, sections}}; верхний уровень — язык по умолчанию.
+    i18n: dict[str, Any] = Field(default_factory=dict)
+    # Хэш набора утверждений, из которого узел собран: совпал — пересборка не нужна.
+    claims_hash: str = ""
 
     def is_groundable(self) -> bool:
         """Хватает ли теории, чтобы генерировать по ней задания.

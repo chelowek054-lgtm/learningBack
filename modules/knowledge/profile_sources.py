@@ -26,19 +26,60 @@ SEARCH_LIMIT = 5  # сколько кандидатов просить у пос
 MAX_QUERIES = 3
 
 
-def queries_for(area_title: str, stage_titles: list[str], concept_titles: list[str]) -> list[str]:
-    """Несколько формулировок: по названию, по названию и ключевым понятиям, по этапам."""
+def queries_for(
+    area_title: str,
+    stage_titles: list[str],
+    concept_titles: list[str],
+    other_titles: list[str] | None = None,
+) -> list[str]:
+    """Формулировки на языках графа: по названию, с ключевыми понятиями, по этапам и название области на другом языке (T-0175)."""
     candidates = [
         area_title,
         " ".join([area_title, *concept_titles[:2]]),
         " ".join([area_title, *stage_titles[:2]]),
     ]
+    # Название области на остальных поддерживаемых языках: хорошие открытые источники есть на каждом из них.
+    candidates += [t for t in (other_titles or []) if t]
     out: list[str] = []
     for q in candidates:
         q = " ".join(q.split())
         if len(q) >= 3 and q not in out:
             out.append(q)
-    return out[:MAX_QUERIES]
+    return out[: MAX_QUERIES + len(other_titles or [])]
+
+
+TITLES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "titles": {
+            "type": "object",
+            "description": "название области на каждом языке: ключ — код языка",
+            "additionalProperties": {"type": "string"},
+        }
+    },
+    "required": ["titles"],
+}
+
+
+def titles_in_languages(gateway, area_title: str) -> list[str]:
+    """Название области на других языках графа (один короткий запрос); сбой модели не мешает поиску."""
+    from modules.knowledge import langs
+
+    if gateway is None:
+        return []
+    codes = langs.supported()
+    try:
+        raw = gateway.structured(
+            "area_titles",
+            "Вернуть название области знаний на каждом языке.",
+            TITLES_SCHEMA,
+            f"Область знаний: «{area_title}». Дай её устоявшееся название на языках: {', '.join(codes)} "
+            "(так, как оно называется в учебниках). Только название, без пояснений.",
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    titles = (raw or {}).get("titles") or {}
+    return [str(v).strip() for v in titles.values() if isinstance(v, str) and v.strip()]
 
 
 def pick_diverse(

@@ -289,7 +289,9 @@ def match(
     return decisions
 
 
-def _queue_sources(session: Session, row: SkillProfile, report: dict[str, Any]) -> list[str]:
+def _queue_sources(
+    session: Session, row: SkillProfile, report: dict[str, Any], gateway: Any = None
+) -> list[str]:
     """Для каждой новой области скелета поставить в фон поиск источников; вернуть области, по которым поставлен."""
     areas = {a["key"]: a for a in row.profile.get("areas", [])}
     queued: list[str] = []
@@ -304,6 +306,7 @@ def _queue_sources(session: Session, row: SkillProfile, report: dict[str, Any]) 
             area["title"],
             [s["title"] for s in area["stages"]],
             [c["title"] for c in area["concepts"]],
+            profile_sources.titles_in_languages(gateway, area["title"]),
         )
         if profile_sources.enqueue(session, row.user_id, item["domain"], queries):
             queued.append(item["domain"])
@@ -326,7 +329,7 @@ def build_graph(
     )
     row.status, row.confirmed_at = CONFIRMED, datetime.now(timezone.utc)
     session.flush()
-    report["sources"] = _queue_sources(session, row, report)
+    report["sources"] = _queue_sources(session, row, report, gateway)
     return report
 
 

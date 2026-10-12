@@ -97,7 +97,7 @@ def test_embeddings_are_stored_once_and_recomputed_only_on_change(session):
     assert session.query(ConceptEmbedding).count() == 1
 
 
-def test_candidates_are_nearest_in_the_same_domain_only(session):
+def test_candidates_are_nearest_across_the_whole_graph(session):
     a = concept(session, "Значения аргументов по умолчанию")
     near = concept(session, "Значения параметров по умолчанию")
     other_domain = concept(session, "Значения аргументов по умолчанию", domain="elsewhere")
@@ -106,8 +106,9 @@ def test_candidates_are_nearest_in_the_same_domain_only(session):
 
     found = merge.candidates(session, a, min_similarity=0.3)
 
-    assert [c.id for c, _ in found] == [near.id]
-    assert 0.3 < found[0][1] <= 1.0
+    # Понятие глобально (R-0073): то же имя в другой области — тоже кандидат; отклонённые не в счёт.
+    assert {c.id for c, _ in found} == {near.id, other_domain.id}
+    assert all(0.3 < sim <= 1.0 for _, sim in found)
 
 
 # ---- решения ----

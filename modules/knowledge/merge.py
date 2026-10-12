@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -32,8 +33,12 @@ from modules.knowledge.models import (
     ConceptEdge,
     ConceptEmbedding,
     ConceptLink,
+    Claim,
+    ConceptArea,
     ConceptSource,
+    ConceptTerm,
     EdgeSource,
+    LearningItem,
     MergeDecision,
     ReviewLog,
     UserConcept,
@@ -105,6 +110,7 @@ def candidates(
 ) -> list[tuple[Concept, float]]:
     """Ближайшие по смыслу понятия той же области: (понятие, косинусная близость), от ближайшего."""
     k = k or settings.merge_candidates
+    everywhere = True
     floor = settings.merge_min_similarity if min_similarity is None else min_similarity
     rows = session.execute(
         text(
@@ -113,12 +119,14 @@ def candidates(
             FROM concept_embedding m
             JOIN concept_embedding o ON o.concept_id <> m.concept_id
             JOIN concept oc ON oc.id = o.concept_id
-            WHERE m.concept_id = :cid AND oc.domain = :domain AND oc.status <> 'rejected'
+            WHERE m.concept_id = :cid AND oc.status <> 'rejected'
+              AND (:everywhere OR oc.domain = :domain)
             ORDER BY o.embedding <=> m.embedding
             LIMIT :k
             """
         ),
-        {"cid": concept.id, "domain": concept.domain, "k": k},
+        # Понятие глобально (R-0073): ищем по всему графу, а не только в своей области.
+        {"cid": concept.id, "domain": concept.domain, "k": k, "everywhere": everywhere},
     ).all()
     out = []
     for cid, sim in rows:
@@ -165,6 +173,22 @@ def _source_count(session: Session, concept: Concept) -> int:
     return session.query(ConceptSource).filter_by(concept_id=concept.id).count()
 
 
+def _norm_name(text_: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", text_.lower()).split())
+
+
+def _names(session: Session, c: Concept) -> set[str]:
+    out = {_norm_name(c.title)}
+    for t in session.query(ConceptTerm).filter_by(concept_id=c.id).all():
+        out.add(_norm_name(t.term))
+    return {x for x in out if x}
+
+
+def same_name(session: Session, a: Concept, b: Concept) -> bool:
+    """Названия совпали: напрямую или через словарь терминов (синонимы и переводы)."""
+    return bool(_names(session, a) & _names(session, b))
+
+
 def pick_keeper(session: Session, a: Concept, b: Concept) -> tuple[Concept, Concept]:
     """Кто остаётся: подтверждённое человеком, иначе с большим числом источников, иначе старшее."""
 
@@ -185,6 +209,7 @@ def merge_into(session: Session, keeper: Concept, loser: Concept, reason: str = 
     if keeper.level is None:
         keeper.level = loser.level
     keeper.optional = keeper.optional and loser.optional
+    _carry_claims_terms_areas(session, keeper, loser)
     # источники понятия
     for src in session.query(ConceptSource).filter_by(concept_id=lid).all():
         has = (
@@ -266,6 +291,47 @@ def merge_into(session: Session, keeper: Concept, loser: Concept, reason: str = 
     session.query(ConceptEmbedding).filter_by(concept_id=lid).delete(synchronize_session=False)
     session.flush()
     session.delete(loser)
+    session.flush()
+
+
+def _carry_claims_terms_areas(session: Session, keeper: Concept, loser: Concept) -> None:
+    """Утверждения, термины и принадлежность областям вливаемого понятия переходят к оставшемуся."""
+    kid, lid = keeper.id, loser.id
+    session.query(Claim).filter_by(concept_id=lid).update(
+        {"concept_id": kid, "status": "proposed"}, synchronize_session=False
+    )
+    # Приходят из другого источника: сверка с принятым пройдёт заново, сборка узла пересоберёт теорию.
+    have = {(t.lang, t.term) for t in session.query(ConceptTerm).filter_by(concept_id=kid).all()}
+    for t in session.query(ConceptTerm).filter_by(concept_id=lid).all():
+        if (t.lang, t.term) not in have:
+            session.add(ConceptTerm(concept_id=kid, lang=t.lang, term=t.term, primary=False))
+            have.add((t.lang, t.term))
+    lang = "ru" if re.search(r"[А-Яа-яЁё]", loser.title) else "en"
+    if (lang, loser.title) not in have:
+        session.add(ConceptTerm(concept_id=kid, lang=lang, term=loser.title, primary=False))
+    areas = {a.domain for a in session.query(ConceptArea).filter_by(concept_id=kid).all()}
+    for domain, stage, order, level, optional in (
+        (keeper.domain, keeper.stage, keeper.stage_order, keeper.level, keeper.optional),
+        (loser.domain, loser.stage, loser.stage_order, loser.level, loser.optional),
+    ):
+        if domain not in areas:
+            session.add(
+                ConceptArea(
+                    concept_id=kid,
+                    domain=domain,
+                    stage=stage,
+                    stage_order=order,
+                    level=level,
+                    optional=bool(optional),
+                )
+            )
+            areas.add(domain)
+    session.query(LearningItem).filter(LearningItem.concept_id.in_([kid, lid])).delete(
+        synchronize_session=False
+    )
+    content = dict(keeper.content or {})
+    content.pop("claims_hash", None)
+    keeper.content = content
     session.flush()
 
 
@@ -385,6 +451,7 @@ class MergeReport:
     judged: int = 0
     reused: int = 0
     merged: int = 0
+    auto: int = 0
     refined: int = 0
     conflicts: int = 0
     cycles_broken: int = 0
@@ -412,7 +479,7 @@ def merge_domain(
     for concept in sorted(concepts, key=lambda c: c.title):
         if session.get(Concept, concept.id) is None:  # уже влит в другое
             continue
-        for other, _sim in candidates(session, concept):
+        for other, sim in candidates(session, concept):
             if session.get(Concept, concept.id) is None:
                 break
             if session.get(Concept, other.id) is None:
@@ -431,6 +498,20 @@ def merge_domain(
                 }
                 if decision.verdict in ("different",):
                     continue
+            elif sim >= settings.merge_auto_similarity and same_name(session, concept, other):
+                # Очень близко по смыслу и имя совпало (в том числе по словарю терминов): модель не нужна.
+                verdict = {
+                    "verdict": "same",
+                    "general": "",
+                    "reason": f"близость {sim:.2f} и то же имя",
+                }
+                session.add(
+                    MergeDecision(
+                        pair_key=key, verdict="same", general="", reason=verdict["reason"]
+                    )
+                )
+                session.flush()
+                report.auto += 1
             else:
                 if report.judged >= budget:
                     report.skipped_budget += 1
@@ -480,12 +561,17 @@ def merge_job(session: Session, job: Job, gateway) -> dict[str, Any]:
     if not domain:
         raise ValueError("Не указана область")
     r = merge_domain(session, domain, gateway)
+    # Дальше — сверка утверждений узлов области и сборка узлов.
+    from modules.knowledge import reconcile
+
+    reconcile.enqueue(session, domain, job.user_id)
     return {
         "domain": domain,
         "embedded": r.embedded,
         "judged": r.judged,
         "reused": r.reused,
         "merged": r.merged,
+        "autoMerged": r.auto,
         "refined": r.refined,
         "conflicts": r.conflicts,
         "cyclesBroken": r.cycles_broken,

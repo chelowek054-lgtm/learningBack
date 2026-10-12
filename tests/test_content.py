@@ -20,6 +20,7 @@ FULL = {
             "body": "Как оно работает",
             "examples": ["пример"],
             "counter_examples": ["заблуждение"],
+            "claims": [],
         }
     ],
     "references": [
@@ -30,6 +31,8 @@ FULL = {
             "fragment_ids": [],
         }
     ],
+    "i18n": {},
+    "claims_hash": "",
 }
 
 
@@ -43,6 +46,8 @@ def test_missing_keys_are_filled_in():
         "summary": "только это",
         "sections": [],
         "references": [],
+        "i18n": {},
+        "claims_hash": "",
     }
 
 
@@ -58,7 +63,7 @@ def test_garbage_never_raises(junk):
     """Вывод LLM бывает любым: узел не должен теряться целиком из-за формы."""
     result = coerce_content(junk)
 
-    assert set(result) == {"summary", "sections", "references"}
+    assert set(result) == {"summary", "sections", "references", "i18n", "claims_hash"}
 
 
 def test_partial_garbage_keeps_the_summary():
@@ -102,7 +107,13 @@ def test_api_stores_normalized_content(session, client):
     )
 
     stored = session.get(Concept, created.json()["id"]).content
-    assert stored == {"summary": "s", "sections": [], "references": []}
+    assert stored == {
+        "summary": "s",
+        "sections": [],
+        "references": [],
+        "i18n": {},
+        "claims_hash": "",
+    }
 
 
 def test_reading_a_node_returns_the_full_shape(session, client):
@@ -122,7 +133,7 @@ def test_reading_a_node_returns_the_full_shape(session, client):
 
     node = client(make_user(session)).get(f"/graph/nodes/{old.id}").json()
 
-    assert set(node["content"]) == {"summary", "sections", "references"}
+    assert set(node["content"]) == {"summary", "sections", "references", "i18n", "claims_hash"}
 
 
 def test_build_fills_in_theory_for_nodes_that_lack_it(session, client):
