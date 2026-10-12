@@ -29,6 +29,12 @@ from core.config import settings
 from core.models import Rubric
 
 _ATTEMPTS = 3
+
+
+class _NoToolCall(ProviderError):
+    """Модель ответила, но инструмент не вызвала и вернуть структуру иначе не смогла: другая модель может справиться."""
+
+
 # Провайдер в тексте 402 сообщает, на сколько токенов хватает остатка.
 # У разных сервисов формулировка отличается — не совпало, значит запрос
 # честно падает с 402, а не молча продолжает.
@@ -96,7 +102,29 @@ class OpenAICompatibleGateway:
             "tool_choice": {"type": "function", "function": {"name": tool_name}},
         }
 
+        # Основная модель, затем запасная (если задана): структурированный ответ у модели по умолчанию
+        # иногда не приходит вовсе (finish_reason=stop без вызова инструмента), T-0124.
+        models = [model]
+        fallback = settings.llm_model_fallback.strip()
+        if fallback and fallback != model:
+            models.append(fallback)
+        for i, current in enumerate(models):
+            payload["model"] = current
+            try:
+                return self._attempts(current, payload, tool_name, schema)
+            except _NoToolCall:
+                if i == len(models) - 1:
+                    raise
+        raise ProviderError(
+            f"{model}: не удалось получить ответ"
+        )  # недостижимо: цикл выше возвращает или бросает
+
+    def _attempts(
+        self, model: str, payload: dict[str, Any], tool_name: str, schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Несколько попыток одной модели; повтор подсказывает, что нужен именно вызов инструмента."""
         last_error = "причина неизвестна"
+        nudged = False
         for _ in range(_ATTEMPTS):
             try:
                 response = self._client.post("/chat/completions", json=payload)
@@ -130,14 +158,44 @@ class OpenAICompatibleGateway:
             if calls:
                 return self._parse_arguments(model, calls[0])
 
+            # Модель могла ответить структурой обычным текстом (часто — в блоке ```json): берём её,
+            # если она похожа на ожидаемую, а не бросаем оплаченный ответ.
+            recovered = self._structure_from_text(message.get("content"), schema)
+            if recovered is not None:
+                return recovered
+
             # Обычно означает обрыв по длине: ответ не поместился в max_tokens.
             last_error = (
                 f"модель не вызвала инструмент {tool_name} "
                 f"(finish_reason={choice.get('finish_reason')}, "
                 f"max_tokens={payload['max_tokens']})"
             )
+            if not nudged:
+                nudged = True
+                payload["messages"] = [
+                    *payload["messages"],
+                    {
+                        "role": "user",
+                        "content": f"Ответь только вызовом инструмента {tool_name}, без обычного текста.",
+                    },
+                ]
 
-        raise ProviderError(f"{model}: не удалось за {_ATTEMPTS} попытки — {last_error}")
+        raise _NoToolCall(f"{model}: не удалось за {_ATTEMPTS} попытки — {last_error}")
+
+    @staticmethod
+    def _structure_from_text(text: Any, schema: dict[str, Any]) -> dict[str, Any] | None:
+        """Достаёт JSON-объект из текста ответа; принимает его, только если в нём есть все обязательные поля схемы."""
+        if not isinstance(text, str) or "{" not in text:
+            return None
+        body = text[text.index("{") : text.rindex("}") + 1] if "}" in text else ""
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        required = schema.get("required") or []
+        return parsed if all(key in parsed for key in required) else None
 
     @staticmethod
     def _affordable_budget(text: str) -> int | None:
