@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://routerai.ru/api/v1"
     llm_model_generation: str = "deepseek/deepseek-v4-flash-0731"
     llm_model_scoring: str = "deepseek/deepseek-v4-flash-0731"
+    # Запасная модель для структурированных ответов: пробуется, когда основная трижды не вызвала инструмент.
+    # Пусто — запасной нет (T-0124).
+    llm_model_fallback: str = ""
     # max_tokens ОБЯЗАТЕЛЕН: без явного лимита провайдер резервирует потолок
     # контекста модели и может отклонить запрос как неоплачиваемый.
     llm_max_tokens: int = 16384
